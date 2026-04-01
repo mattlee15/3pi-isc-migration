@@ -26,6 +26,82 @@ ruby tmp/3pi_isc_migration/scripts/main.rb
 
 ---
 
+## Migration Statistics & Progress
+
+### Current State (as of 2026-04-01)
+
+#### Configs Already Migrated to `*.integrations.integrations`
+
+| Service | Total Configs | Template Pattern | No-Template Pattern | Template Adoption |
+|---------|--------------|------------------|---------------------|-------------------|
+| **Loyalty Card** | 129 | 118 (91.5%) | 11 (8.5%) | 91.5% |
+| **Loyalty Points** | 63 | 40 (63.5%) | 23 (36.5%) | 63.5% |
+| **Offers** | 206 | 86 (41.7%) | 120 (58.3%) | 41.7% |
+| **TOTAL** | **398** | **244 (61.3%)** | **154 (38.7%)** | **61.3%** |
+
+#### Configs Remaining in `rpc.integrations.integrations` (Not Yet Migrated)
+
+| Service | Configs to Migrate |
+|---------|-------------------|
+| **Loyalty Card** | 12 |
+| **Loyalty Points** | 11 |
+| **Offers** | ~25 |
+| **TOTAL** | **~48** |
+
+#### Overall Migration Progress
+
+```
+Total Configs: ~446 (398 migrated + 48 remaining)
+Migration Completion: ~89% (398/446)
+Remaining Work: ~11% (48/446)
+```
+
+**Progress Visualization:**
+
+```
+[████████████████████████████████████████░░░░] 89% Complete
+```
+
+### Pattern Distribution Insights
+
+**Why No-Template Pattern? (38.7% of migrated configs)**
+
+The 154 configs using **no-template** pattern fall into these categories:
+
+1. **Cross-Parent Secrets** (most common): Secret fields under different parent keys
+   ```yaml
+   # Can't template - secrets under different parents
+   birdzi:
+     api_key: "secret1"     # ← Under birdzi
+   lms:
+     password: "secret2"    # ← Under lms
+   # Solution: Store entire config as secret ref
+   ```
+
+2. **User Preference**: Operator chose "Full no-template" for simplicity
+3. **Legacy Compatibility**: Minimal disruption for existing integrations
+
+**Template Adoption by Service:**
+
+* **Loyalty Card: 91.5%** - Highest adoption, cleanly structured secrets under single parent
+* **Loyalty Points: 63.5%** - Moderate adoption, some cross-parent secrets
+* **Offers: 41.7%** - Lower adoption due to complex config structures
+
+**Security Benefits:**
+
+All 398 migrated configs (template + no-template) benefit from:
+* ✅ Separation from monolithic storage in `rpc.integrations.integrations`
+* ✅ Dedicated secret refs with proper ISC permissions
+* ✅ Independent secret rotation capability
+
+**Additional Template Benefits (244 configs):**
+* ✅ Public config data separated from secrets (only 136 chars secrets vs 3,400+ chars)
+* ✅ DynamoDB capacity savings (non-secret data in S3)
+* ✅ Easier config updates without touching secrets
+* ✅ Better GitOps compatibility
+
+---
+
 ## Tool Guide
 
 ### Directory Layout
