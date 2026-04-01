@@ -133,13 +133,21 @@ end
 #   3. If nothing found, inspect the conf content for secret-looking keys to judge
 #      whether a template migration could still be applied.
 def migration_detail_label(conf_name, dest_raw:, environment:)
+  # Check if the config uses $$secret$$ template pattern
+  uses_template = dest_raw&.include?("$$secret$$")
+
   dest_meta = find_conf(conf_name, service: DEFAULT_SERVICE, environment: environment)
   if dest_meta
     ref_name = dest_meta["secretref"] || dest_meta["secret_ref"] ||
                dest_meta["secretRefName"] || dest_meta["secret_ref_name"] ||
                dest_meta["secretref_name"]
     ref_name = nil if ref_name.to_s.strip.empty?
-    return " [MIGRATED WITH SECRET-REF: #{ref_name}]" if ref_name
+
+    if ref_name && uses_template
+      return " [✅ MIGRATED: template with secret-ref #{ref_name}]"
+    elsif ref_name && !uses_template
+      return " [⚠️  MONOLITHIC: linked to #{ref_name} but no $$secret$$]"
+    end
   end
 
   # Naming-convention fallback: look for _SECRET / _SECRETS refs we would have created
@@ -147,13 +155,23 @@ def migration_detail_label(conf_name, dest_raw:, environment:)
   named_ref = ["#{base}_SECRET", "#{base}_SECRETS"].find do |n|
     find_secret_ref(n, environment: environment)
   end
-  return " [MIGRATED WITH SECRET-REF: #{named_ref}]" if named_ref
 
-  # No secret ref found — check content for convertibility
+  if named_ref && uses_template
+    return " [✅ MIGRATED: template with secret-ref #{named_ref}]"
+  elsif named_ref && !uses_template
+    return " [⚠️  MONOLITHIC: linked to #{named_ref} but no $$secret$$]"
+  end
+
+  # No secret ref found — check content
+  if uses_template
+    return " [⚠️  TEMPLATE FOUND but no secret-ref link detected]"
+  end
+
+  # Plain YAML config (no template, no secret ref)
   dest_parsed = YAML.safe_load(dest_raw) rescue nil
   dest_keys   = dest_parsed ? flatten_keys(dest_parsed) : []
   secret_like = dest_keys.select { |k| k.split(".").last.downcase.match?(/secret|password|key|token|signature/) }
-  secret_like.any? ? " [MIGRATED - NO TEMPLATE BUT POSSIBLE!]" : " [MIGRATED - NO TEMPLATE]"
+  secret_like.any? ? " [PLAIN YAML with secret-like keys]" : " [PLAIN YAML - no secrets]"
 end
 
 def try_read_conf(conf_name, service:, environment:)
@@ -600,11 +618,20 @@ def mode_manual
         d = fetched[env]
         has_access = d[:raw] && d[:raw] != :no_access
 
-        # Build clearer source status label
+        # Build clearer source status label based on source and dest state
         if d[:raw] == :no_access
           source_status = "NO ACCESS"
         elsif has_access && d[:dest_exists]
-          source_status = "EXISTS (already migrated)"
+          # Check dest detail to see if it's truly migrated or needs work
+          if d[:detail].include?("✅ MIGRATED")
+            source_status = "EXISTS (✅ already migrated)"
+          elsif d[:detail].include?("⚠️  MONOLITHIC")
+            source_status = "EXISTS (⚠️ needs re-migration)"
+          elsif d[:detail].include?("PLAIN YAML")
+            source_status = "EXISTS (migrated as plain YAML)"
+          else
+            source_status = "EXISTS (migration status unclear)"
+          end
         elsif has_access && !d[:dest_exists]
           source_status = "EXISTS (ready to migrate)"
         elsif !d[:raw] && d[:dest_exists]
