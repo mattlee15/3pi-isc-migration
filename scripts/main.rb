@@ -233,6 +233,17 @@ end
 
 # Returns :success, :skipped, or :failed
 def migrate_one(conf_name, environment:, raw:, already_migrated:)
+  # Safety check: ensure raw is a valid string (not :no_access or nil)
+  if raw == :no_access
+    puts "  ERROR: Cannot migrate - no access to config"
+    return :failed
+  end
+
+  unless raw.is_a?(String)
+    puts "  ERROR: Invalid config data (expected String, got #{raw.class})"
+    return :failed
+  end
+
   parsed = YAML.safe_load(raw)
 
   # Fix SSH private key formatting (ensure proper newlines and structure)
@@ -723,9 +734,10 @@ def mode_manual
       end
 
       # Use source raw if available, otherwise use dest raw for re-migration
-      raw_to_use = s[:raw] || s[:dest_raw]
+      # Note: :no_access is truthy, so we need to explicitly check for it
+      raw_to_use = (s[:raw] && s[:raw] != :no_access) ? s[:raw] : s[:dest_raw]
 
-      unless raw_to_use
+      unless raw_to_use && raw_to_use != :no_access
         puts "  ERROR: Cannot migrate - no source or dest config found for #{environment}"
         next
       end
@@ -1233,9 +1245,10 @@ def migrate_from_generated_csv(csv_path, source_pattern, dest_pattern)
       end
 
       # Use source raw if available, otherwise use dest raw for re-migration
-      raw_to_use = d[:raw] || d[:dest_raw]
+      # Note: :no_access is truthy, so we need to explicitly check for it
+      raw_to_use = (d[:raw] && d[:raw] != :no_access) ? d[:raw] : d[:dest_raw]
 
-      unless raw_to_use
+      unless raw_to_use && raw_to_use != :no_access
         puts "  ERROR: Cannot migrate - no source or dest config found for #{environment}"
         next
       end
