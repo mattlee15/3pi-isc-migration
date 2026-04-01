@@ -270,6 +270,36 @@ def try_cleanup_secret_ref(name, environment: DEFAULT_ENVIRONMENT)
   end
 end
 
+# ── YAML Sanitization ─────────────────────────────────────────────────────────
+
+# Fix YAML with unquoted values that start with YAML indicator characters.
+# This handles cases where values like ",abc" or "[test]" cause parse errors.
+# Returns sanitized YAML string that can be safely parsed.
+def sanitize_yaml(yaml_string)
+  lines = yaml_string.lines
+  fixed_lines = lines.map do |line|
+    # Match pattern: key: value (where value starts with special char)
+    # Only fix if value is not already quoted and starts with YAML indicator
+    if line.match?(/^(\s*)([a-zA-Z_][\w-]*):(\s+)([,\[\]\{\}])/)
+      line.sub(/^(\s*)([a-zA-Z_][\w-]*):(\s+)(.+)$/) do
+        indent = $1
+        key = $2
+        spacing = $3
+        value = $4.chomp
+        # Quote the value if it starts with YAML special chars and isn't already quoted
+        if value.match?(/^[,\[\]\{\}]/) && !value.match?(/^["']/)
+          "#{indent}#{key}:#{spacing}\"#{value}\"\n"
+        else
+          line
+        end
+      end
+    else
+      line
+    end
+  end
+  fixed_lines.join
+end
+
 # ── SSH Key Formatting ────────────────────────────────────────────────────────
 
 # Detect if a string looks like an SSH/RSA/other private key or certificate

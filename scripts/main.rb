@@ -244,18 +244,30 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
     return :failed
   end
 
+  # Sanitize YAML to fix common issues (e.g., unquoted values starting with special chars)
+  sanitized_raw = sanitize_yaml(raw)
+
   # Parse YAML with error handling
   begin
-    parsed = YAML.safe_load(raw)
+    parsed = YAML.safe_load(sanitized_raw)
   rescue Psych::SyntaxError => e
     puts "  ERROR: Malformed YAML in config - #{e.message}"
     puts
-    puts "  Raw YAML content:"
+    puts "  Original YAML content:"
     puts "  " + ("-" * 70)
     raw.lines.each_with_index do |line, idx|
       puts "  #{(idx + 1).to_s.rjust(3)}: #{line}"
     end
     puts "  " + ("-" * 70)
+    if sanitized_raw != raw
+      puts
+      puts "  Sanitized YAML (attempted fix):"
+      puts "  " + ("-" * 70)
+      sanitized_raw.lines.each_with_index do |line, idx|
+        puts "  #{(idx + 1).to_s.rjust(3)}: #{line}"
+      end
+      puts "  " + ("-" * 70)
+    end
     puts
     puts "  This config needs manual inspection/repair before migration."
     return :failed
