@@ -57,7 +57,8 @@ puts
 
 # Fetch all configs matching prefix in a given pattern + environment
 def fetch_configs_for_prefix(prefix, pattern, environment)
-  search_key = "env/#{prefix}"
+  # Special case: "ALL" means search for any config starting with "env/"
+  search_key = prefix.upcase == "ALL" ? "env/" : "env/#{prefix}"
   stdout, success = isc("isc", "conf", "-e", environment, pattern, "search", "-k", search_key, "--as-json")
   return [] unless success
 
