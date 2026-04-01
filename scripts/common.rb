@@ -162,7 +162,7 @@ end
 # Set skip_dedup: true to force creation even if a matching value exists.
 def create_or_find_secret_ref(name, value, principals: DEFAULT_PRINCIPALS, environment: DEFAULT_ENVIRONMENT, skip_dedup: false)
   unless skip_dedup
-    existing = find_secret_ref_by_value(value, environment: environment, show_permissions: true)
+    existing = find_secret_ref_by_value(value, environment: environment, show_my_perms: true)
     if existing
       puts "  Found existing secret ref with same value: #{existing['name']} — reusing."
       return existing["name"]
