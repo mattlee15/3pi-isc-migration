@@ -245,6 +245,41 @@ The plan is **auto-derived** from the keys you select — no separate confirmati
 
 **Note**: If a single-value template is selected but the value is multiline (SSH private keys, certificates, etc.), the tool **automatically upgrades to multi-value template** to ensure proper YAML literal block scalar formatting.
 
+#### Future consideration: Subtree template pattern
+
+**Current limitation**: When secrets are under different parent keys (cross-parent secrets), the tool uses `no_template` pattern (entire config becomes monolithic). This means all non-secret fields are included in the secret ref, which isn't ideal.
+
+**Potential enhancement**: A 4th pattern called `subtree_template` could find the **smallest common ancestor** containing all secrets and make only that subtree the secret:
+
+```yaml
+# Example: secrets under different subkeys
+metadata:
+  version: 1.0              # ← Could stay plain
+credentials:
+  lms:
+    password: secret1       # ← Secret
+  api:
+    api_key: secret2        # ← Secret
+settings:
+  timeout: 30               # ← Could stay plain
+```
+
+**With subtree_template:**
+- **Template**: Only `credentials:` section has `$$secret$$`
+- **Secret ref**: Just the `credentials` subtree (includes both secrets + their non-secret siblings)
+- **Benefit**: `metadata` and `settings` stay plain (can be updated without touching secrets)
+
+**Compared to current no_template**: Entire config would be monolithic (including metadata and settings).
+
+**Trade-offs:**
+- ✅ Better granularity than full monolithic
+- ✅ Reduces secret rotation surface area
+- ⚠️ Still includes some non-secrets in the secret block (e.g., URL under `lms`)
+- ⚠️ More complex implementation (ancestor detection, subtree extraction)
+- ⚠️ May not provide significant benefit if secrets are tightly clustered anyway
+
+**Decision**: Not implemented yet. Current `no_template` pattern is safer and simpler for initial migration. Can be added later as an optional 4th pattern if there's clear value from real-world configs.
+
 #### Secret ref naming
 
 | Plan | Secret ref name |
@@ -269,6 +304,41 @@ ISC provides no `--force` or `--yes` flag to bypass this prompt. **Workaround**:
 ```
 (Deleting existing conf to avoid confirmation prompt)
 ```
+
+#### Migration status detection
+
+When checking configs across environments, the tool now **detects whether configs are already migrated using templates** by checking for `$$secret$$` placeholders. This helps you identify which configs need work vs which are already complete.
+
+**Status labels you'll see:**
+
+**Destination status:**
+- `✅ MIGRATED: template with secret-ref [name]` - Fully migrated with template pattern (no work needed!)
+- `⚠️  MONOLITHIC: linked to [name] but no $$secret$$` - Has secret-ref but still monolithic (should re-migrate)
+- `PLAIN YAML - no secrets` - Plain config without secrets (no migration needed)
+- `PLAIN YAML with secret-like keys` - Has password/key fields but stored as plain YAML
+
+**Source status:**
+- `EXISTS (✅ already migrated)` - Source exists, dest fully migrated with template
+- `EXISTS (⚠️ needs re-migration)` - Source exists, dest is monolithic without template
+- `EXISTS (ready to migrate)` - Source exists, dest doesn't exist yet
+- `EXISTS (migrated as plain YAML)` - Migrated without secrets
+
+**Example output:**
+```
+Environment: production
+  Source: EXISTS (✅ already migrated)
+  Dest:   EXISTS [✅ MIGRATED: template with secret-ref LOYALTY_V1_..._SECRET]
+```
+Translation: "This config is done! It's using the template pattern. Skip it."
+
+vs.
+
+```
+Environment: production
+  Source: EXISTS (⚠️ needs re-migration)
+  Dest:   EXISTS [⚠️ MONOLITHIC: linked to env/LOYALTY_V1_... but no $$secret$$]
+```
+Translation: "This config has a secret-ref but isn't using templates. Re-migrate to upgrade."
 
 ---
 
