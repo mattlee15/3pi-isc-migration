@@ -260,6 +260,16 @@ If the conf already exists in `*.integrations.integrations`, the tool updates it
 - Secret ref: updated in place if only linked to this one conf; a new ref is created if shared with others.
 - Source conf deletion and cleanup are skipped if the source was already removed.
 
+**ISC TTY limitation workaround**: When overwriting an existing config, ISC normally prompts for confirmation (`Overwrite? [y/N]`), but this fails in non-interactive contexts (Ruby scripts) with:
+```
+Error: attempted to confirm but input was not a TTY
+```
+
+ISC provides no `--force` or `--yes` flag to bypass this prompt. **Workaround**: The tool automatically deletes the existing config first, then creates the new one. This applies to all migration patterns (single-value, multi-value, no-template, no-secret) when re-migrating. You'll see:
+```
+(Deleting existing conf to avoid confirmation prompt)
+```
+
 ---
 
 ### Secret Ref Deduplication
@@ -470,6 +480,13 @@ The tool automatically handles this:
 - **Impact**: Must unlink or delete all configs first before removing the secret ref
 - **Detection**: Mode 3 automatically checks for linked configs and blocks deletion attempts
 - **Workaround**: None — this is a safety feature. Must unlink configs first.
+
+#### 8. No `--force` Flag for Overwriting Configs
+- **Issue**: When overwriting an existing config, `isc conf set` prompts for interactive confirmation (`Overwrite? [y/N]`), but fails in non-TTY contexts (scripts) with: `Error: attempted to confirm but input was not a TTY`
+- **Impact**: Cannot re-migrate configs from scripts without workaround
+- **Root cause**: ISC has no `--force`, `--yes`, or similar flag to bypass confirmation prompts
+- **Workaround**: The tool automatically deletes the existing config first (`isc conf clear`), then creates the new one. This applies to all migration patterns when re-migrating. You'll see: `(Deleting existing conf to avoid confirmation prompt)`
+- **Affected functions**: `create_plain_conf`, `create_conf_with_template`, `link_conf_to_secret_ref`
 
 ---
 
