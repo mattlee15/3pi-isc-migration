@@ -15,6 +15,7 @@ ruby tests/test_build_secret_block.rb
 ruby tests/test_common_helpers.rb
 ruby tests/test_edge_cases.rb
 ruby tests/test_template_validation.rb
+ruby tests/test_yaml_sanitization.rb
 ```
 
 ### Run specific test by name
@@ -78,6 +79,17 @@ Integration tests that validate template substitution:
 - ✅ Special characters in substituted values
 - ✅ Indentation correctness verification
 - ✅ Roundtrip equality (template + secret = original)
+
+### `test_yaml_sanitization.rb`
+Tests for YAML sanitization to handle malformed ISC configs:
+- ✅ Values starting with comma (`,value`)
+- ✅ Values starting with brackets (`[test]`)
+- ✅ Values starting with braces (`{data`)
+- ✅ Already quoted values (no double-quoting)
+- ✅ Preservation of valid YAML
+- ✅ Multiple problematic values in same config
+- ✅ Indentation preservation
+- ✅ Empty string and edge cases
 
 ## Test Scenarios
 
