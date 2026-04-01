@@ -138,21 +138,14 @@ def truncate_ref_name(ref_name, max_length: 10)
 end
 
 def migration_detail_label(conf_name, dest_raw:, environment:)
-  # Check if the config uses $$secret$$ template pattern
-  # dest_raw can be a String, nil, or Symbol (:no_access)
-  uses_template = dest_raw.is_a?(String) && dest_raw.include?("$$secret$$")
-
   dest_meta = find_conf(conf_name, service: DEFAULT_SERVICE, environment: environment)
   if dest_meta
     ref_name = dest_meta["secretref"] || dest_meta["secret_ref"] ||
                dest_meta["secretRefName"] || dest_meta["secret_ref_name"] ||
                dest_meta["secretref_name"]
-    ref_name = nil if ref_name.to_s.strip.empty?
 
-    if ref_name && uses_template
-      return " [✅ MIGRATED: template with #{truncate_ref_name(ref_name)}]"
-    elsif ref_name && !uses_template
-      return " [⚠️  MONOLITHIC: linked to #{truncate_ref_name(ref_name)}]"
+    if ref_name && !ref_name.to_s.strip.empty?
+      return " [using: #{truncate_ref_name(ref_name)}]"
     end
   end
 
@@ -162,22 +155,10 @@ def migration_detail_label(conf_name, dest_raw:, environment:)
     find_secret_ref(n, environment: environment)
   end
 
-  if named_ref && uses_template
-    return " [✅ MIGRATED: template with #{truncate_ref_name(named_ref)}]"
-  elsif named_ref && !uses_template
-    return " [⚠️  MONOLITHIC: linked to #{truncate_ref_name(named_ref)}]"
-  end
+  return " [using: #{truncate_ref_name(named_ref)}]" if named_ref
 
-  # No secret ref found — check content
-  if uses_template
-    return " [⚠️  TEMPLATE FOUND but no secret-ref link detected]"
-  end
-
-  # Plain YAML config (no template, no secret ref)
-  dest_parsed = YAML.safe_load(dest_raw) rescue nil
-  dest_keys   = dest_parsed ? flatten_keys(dest_parsed) : []
-  secret_like = dest_keys.select { |k| k.split(".").last.downcase.match?(/secret|password|key|token|signature/) }
-  secret_like.any? ? " [PLAIN YAML with secret-like keys]" : " [PLAIN YAML - no secrets]"
+  # No secret ref linked - plain YAML config
+  ""
 end
 
 def try_read_conf(conf_name, service:, environment:)
