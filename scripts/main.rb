@@ -132,7 +132,7 @@ end
 #   2. Fall back to looking up secret refs by our naming convention (_SECRET / _SECRETS).
 #   3. If nothing found, inspect the conf content for secret-looking keys to judge
 #      whether a template migration could still be applied.
-def truncate_ref_name(ref_name, max_length: 10)
+def truncate_ref_name(ref_name, max_length: 30)
   return ref_name if ref_name.nil? || ref_name.length <= max_length
   "#{ref_name[0...max_length]}..."
 end
