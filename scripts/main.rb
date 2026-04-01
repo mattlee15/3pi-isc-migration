@@ -132,6 +132,11 @@ end
 #   2. Fall back to looking up secret refs by our naming convention (_SECRET / _SECRETS).
 #   3. If nothing found, inspect the conf content for secret-looking keys to judge
 #      whether a template migration could still be applied.
+def truncate_ref_name(ref_name, max_length: 10)
+  return ref_name if ref_name.nil? || ref_name.length <= max_length
+  "#{ref_name[0...max_length]}..."
+end
+
 def migration_detail_label(conf_name, dest_raw:, environment:)
   # Check if the config uses $$secret$$ template pattern
   uses_template = dest_raw&.include?("$$secret$$")
@@ -144,9 +149,9 @@ def migration_detail_label(conf_name, dest_raw:, environment:)
     ref_name = nil if ref_name.to_s.strip.empty?
 
     if ref_name && uses_template
-      return " [✅ MIGRATED: template with secret-ref #{ref_name}]"
+      return " [✅ MIGRATED: template with #{truncate_ref_name(ref_name)}]"
     elsif ref_name && !uses_template
-      return " [⚠️  MONOLITHIC: linked to #{ref_name} but no $$secret$$]"
+      return " [⚠️  MONOLITHIC: linked to #{truncate_ref_name(ref_name)}]"
     end
   end
 
@@ -157,9 +162,9 @@ def migration_detail_label(conf_name, dest_raw:, environment:)
   end
 
   if named_ref && uses_template
-    return " [✅ MIGRATED: template with secret-ref #{named_ref}]"
+    return " [✅ MIGRATED: template with #{truncate_ref_name(named_ref)}]"
   elsif named_ref && !uses_template
-    return " [⚠️  MONOLITHIC: linked to #{named_ref} but no $$secret$$]"
+    return " [⚠️  MONOLITHIC: linked to #{truncate_ref_name(named_ref)}]"
   end
 
   # No secret ref found — check content
