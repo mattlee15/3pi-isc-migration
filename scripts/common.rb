@@ -57,17 +57,41 @@ rescue JSON::ParserError
 end
 
 # Create a conf with a $$secret$$ template linked to a secret ref.
+# If the conf already exists, it will be deleted first to avoid ISC's interactive confirmation prompt.
 def create_conf_with_template(conf_name, template, secretref_name, service: DEFAULT_SERVICE, environment: DEFAULT_ENVIRONMENT)
+  # Check if conf already exists and delete it first to avoid confirmation prompt
+  existing = find_conf(conf_name, service: service, environment: environment)
+  if existing
+    puts "    (Deleting existing conf to avoid confirmation prompt)"
+    delete_conf(conf_name, service: service, environment: environment, ignore_secretref: true)
+  end
+
   isc!("isc", "conf", "-e", environment, service, "set", conf_name, "--no-env", "-t", template, "-sn", secretref_name)
 end
 
 # Create a conf linked directly to an existing secret ref (no template).
+# If the conf already exists, it will be deleted first to avoid ISC's interactive confirmation prompt.
 def link_conf_to_secret_ref(conf_name, secretref_name, service: DEFAULT_SERVICE, environment: DEFAULT_ENVIRONMENT)
+  # Check if conf already exists and delete it first to avoid confirmation prompt
+  existing = find_conf(conf_name, service: service, environment: environment)
+  if existing
+    puts "    (Deleting existing conf to avoid confirmation prompt)"
+    delete_conf(conf_name, service: service, environment: environment, ignore_secretref: true)
+  end
+
   isc!("isc", "conf", "-e", environment, service, "set", conf_name, "--no-env", "-sn", secretref_name)
 end
 
 # Create a plain conf (no secret ref) with YAML content.
+# If the conf already exists, it will be deleted first to avoid ISC's interactive confirmation prompt.
 def create_plain_conf(conf_name, yaml_content, service: DEFAULT_SERVICE, environment: DEFAULT_ENVIRONMENT)
+  # Check if conf already exists and delete it first to avoid confirmation prompt
+  existing = find_conf(conf_name, service: service, environment: environment)
+  if existing
+    puts "    (Deleting existing conf to avoid confirmation prompt)"
+    delete_conf(conf_name, service: service, environment: environment, ignore_secretref: true)
+  end
+
   # Use --file for multiline YAML to avoid shell escaping issues
   Tempfile.create("isc_conf") do |f|
     f.write(yaml_content)
