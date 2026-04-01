@@ -139,7 +139,8 @@ end
 
 def migration_detail_label(conf_name, dest_raw:, environment:)
   # Check if the config uses $$secret$$ template pattern
-  uses_template = dest_raw&.include?("$$secret$$")
+  # dest_raw can be a String, nil, or Symbol (:no_access)
+  uses_template = dest_raw.is_a?(String) && dest_raw.include?("$$secret$$")
 
   dest_meta = find_conf(conf_name, service: DEFAULT_SERVICE, environment: environment)
   if dest_meta
