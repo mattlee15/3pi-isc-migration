@@ -353,6 +353,160 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     assert_equal parsed, merged
   end
 
+  # Four-level nesting: secret at deepest level
+  def test_four_level_nesting_secret_at_bottom
+    parsed = {
+      "level1" => {
+        "level2" => {
+          "level3" => {
+            "level4_secret" => "secret_value",
+            "level4_public" => "public_value"
+          },
+          "level3_public" => "another_public"
+        }
+      }
+    }
+
+    secret_key_paths = ["level1.level2.level3.level4_secret"]
+
+    template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
+    secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Template should preserve all non-secret fields
+    assert_match(/level4_public: public_value/, template)
+    assert_match(/level3_public: another_public/, template)
+    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+
+    # Template should NOT have secret field
+    refute_match(/level4_secret:/, template)
+
+    # Verify runtime merge
+    merged = simulate_runtime_merge(template, secret_value)
+    assert_equal parsed, merged
+  end
+
+  # Four-level nesting: secret at level 4 is only child of level 3
+  def test_four_level_nesting_secret_only_child
+    parsed = {
+      "level1" => {
+        "level2" => {
+          "level3_with_secret" => {
+            "level4_secret" => "secret_value"
+          },
+          "level3_public" => {
+            "level4_public" => "public_value"
+          }
+        }
+      }
+    }
+
+    secret_key_paths = ["level1.level2.level3_with_secret.level4_secret"]
+
+    template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
+    secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Template should have the public branch
+    assert_match(/level4_public: public_value/, template)
+    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+
+    # Template should NOT have level3_with_secret at all (empty after removing secret)
+    refute_match(/level3_with_secret:/, template)
+    refute_match(/level4_secret:/, template)
+
+    # Verify runtime merge
+    merged = simulate_runtime_merge(template, secret_value)
+    assert_equal parsed, merged
+  end
+
+  # Four-level nesting: secrets at multiple levels in same branch
+  def test_four_level_nesting_secrets_at_multiple_levels
+    parsed = {
+      "level1" => {
+        "level2" => {
+          "level2_secret" => "secret_at_2",
+          "level3" => {
+            "level3_secret" => "secret_at_3",
+            "level4" => {
+              "level4_secret" => "secret_at_4",
+              "level4_public" => "public_value"
+            }
+          }
+        }
+      }
+    }
+
+    secret_key_paths = [
+      "level1.level2.level2_secret",
+      "level1.level2.level3.level3_secret",
+      "level1.level2.level3.level4.level4_secret"
+    ]
+
+    template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
+    secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Template should only have public value
+    assert_match(/level4_public: public_value/, template)
+    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+
+    # Template should NOT have any secret fields
+    refute_match(/level2_secret:/, template)
+    refute_match(/level3_secret:/, template)
+    refute_match(/level4_secret:/, template)
+
+    # Verify runtime merge
+    merged = simulate_runtime_merge(template, secret_value)
+    assert_equal parsed, merged
+  end
+
+  # Four-level nesting: multiple secrets in different branches
+  def test_four_level_nesting_multiple_branches
+    parsed = {
+      "provider_a" => {
+        "region_us" => {
+          "datacenter_east" => {
+            "api_key" => "secret_east",
+            "endpoint" => "https://east.example.com"
+          },
+          "datacenter_west" => {
+            "api_key" => "secret_west",
+            "endpoint" => "https://west.example.com"
+          }
+        }
+      },
+      "provider_b" => {
+        "region_eu" => {
+          "datacenter_london" => {
+            "token" => "secret_london",
+            "url" => "https://london.example.com"
+          }
+        }
+      }
+    }
+
+    secret_key_paths = [
+      "provider_a.region_us.datacenter_east.api_key",
+      "provider_a.region_us.datacenter_west.api_key",
+      "provider_b.region_eu.datacenter_london.token"
+    ]
+
+    template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
+    secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Template should preserve all non-secret fields
+    assert_match(/endpoint: https:\/\/east\.example\.com/, template)
+    assert_match(/endpoint: https:\/\/west\.example\.com/, template)
+    assert_match(/url: https:\/\/london\.example\.com/, template)
+    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+
+    # Template should NOT have secret fields
+    refute_match(/api_key:/, template)
+    refute_match(/token:/, template)
+
+    # Verify runtime merge
+    merged = simulate_runtime_merge(template, secret_value)
+    assert_equal parsed, merged
+  end
+
   # Edge case: secret is the only child of a parent
   def test_secret_only_child_of_parent
     parsed = {

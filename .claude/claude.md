@@ -213,6 +213,45 @@ likely_secret = key.match?(/secret|password|key|token|signature/i)
 
 ## Testing
 
+### Automated Test Suite
+```bash
+# Run full test suite (all patterns)
+ruby tests/run_all_tests.rb
+# Current: 100 runs, 489 assertions, 0 failures
+
+# Run specific pattern tests
+ruby tests/test_migrate_auto_merge_secrets.rb     # 15 comprehensive tests
+ruby tests/test_migrate_single_value_template.rb
+ruby tests/test_migrate_multi_value_template.rb
+```
+
+### Auto-Merge Secrets Test Coverage
+The `test_migrate_auto_merge_secrets.rb` suite includes 15 comprehensive tests:
+
+**Basic scenarios:**
+- Cross-parent secrets (2+ parents with secrets)
+- Deep nesting (3-level structures)
+- SSH keys and certificate chains
+- Special characters in values
+- Mixed same and cross-parent secrets
+- Top-level and nested secrets
+
+**4-level nesting scenarios:**
+- Secret at bottom with non-secret siblings
+- Secret as only child (parent removal)
+- Secrets at multiple levels in same branch
+- Multiple secrets across different branches
+
+**Edge cases:**
+- Empty parent hash cleanup when secret is only child
+- Arrays in config
+- Empty parent keys that existed in original
+
+All tests verify:
+- Template excludes secret fields
+- Secret value preserves parent structure with correct indentation
+- Runtime merge (simulating configurations/base.rb) reconstructs original config
+
 ### Quick Validation
 ```bash
 # Test each migration pattern on staging
@@ -221,10 +260,19 @@ ruby tmp/3pi_isc_migration/scripts/test_migrate_multi_value_template.rb
 ruby tmp/3pi_isc_migration/scripts/test_migrate_no_template.rb
 ```
 
+### Runtime Merge Testing
+```bash
+# Interactive script to test configs after migration
+ruby scripts/test_runtime_merge.rb
+# Simulates configurations/base.rb deep merge behavior
+# Loads Rails if available for exact ActiveSupport methods
+```
+
 ### Manual Testing Flow
 1. Use Mode 1 (Manual by Name) for one-off testing
 2. Check staging first, then production
-3. Verify with: `isc conf -e staging *.integrations.integrations get env/...`
+3. Verify with: `isc conf -e staging '*.integrations.integrations' get env/...`
+4. Use `test_runtime_merge.rb` to verify runtime behavior
 
 ---
 
