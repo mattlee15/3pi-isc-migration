@@ -95,16 +95,39 @@ module MigrateAutoMergeSecrets
     # Clone the full config
     template_hash = deep_dup(parsed)
 
-    # Remove secret fields from template
+    # Remove secret fields from template and clean up empty parents
     secret_key_paths.each do |path|
       parts = path.split(".")
-      # Navigate to parent, then delete the leaf key
+
       if parts.length == 1
         # Top-level secret
         template_hash.delete(parts[0])
       else
+        # Navigate to parent and delete the leaf key
         parent = template_hash.dig(*parts[0..-2])
         parent&.delete(parts[-1])
+
+        # Walk back up the tree and remove any parents that are now empty
+        # (only parents that became empty from removing this secret)
+        (parts.length - 2).downto(0) do |i|
+          current_path = parts[0..i]
+          current_node = template_hash.dig(*current_path)
+
+          # If this node is now empty, remove it from its parent
+          if current_node.is_a?(Hash) && current_node.empty?
+            if i == 0
+              # Top-level key
+              template_hash.delete(current_path[0])
+            else
+              # Nested key
+              parent_node = template_hash.dig(*current_path[0..-2])
+              parent_node&.delete(current_path[-1])
+            end
+          else
+            # Node is not empty, stop walking up
+            break
+          end
+        end
       end
     end
 

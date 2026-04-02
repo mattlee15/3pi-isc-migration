@@ -353,6 +353,44 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     assert_equal parsed, merged
   end
 
+  # Edge case: secret is the only child of a parent
+  def test_secret_only_child_of_parent
+    parsed = {
+      "regular" => "public_value",
+      "nested" => {
+        "timeout" => 1,
+        "another_key" => "another_secret"
+      },
+      "second_nested" => {
+        "signature" => "signature_value"  # Only child under second_nested
+      },
+      "test_key" => "secret_value"
+    }
+
+    secret_key_paths = ["nested.another_key", "second_nested.signature", "test_key"]
+
+    template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
+    secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Template should have non-secret fields only
+    assert_match(/regular: public_value/, template)
+    assert_match(/timeout: 1/, template)
+    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+
+    # Template should NOT have secret fields
+    refute_match(/another_key:/, template)
+    refute_match(/signature:/, template)
+    refute_match(/test_key:/, template)
+
+    # Template should NOT have empty parent hash for second_nested
+    refute_match(/second_nested: \{\}/, template)
+    refute_match(/second_nested:\s*$/, template)  # Also check for empty with newline
+
+    # Verify runtime merge
+    merged = simulate_runtime_merge(template, secret_value)
+    assert_equal parsed, merged
+  end
+
   # Real-world scenario: NCR LMS config with cross-parent secrets
   def test_real_world_ncr_lms
     parsed = {
