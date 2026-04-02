@@ -316,45 +316,75 @@ The plan is **auto-derived** from the keys you select — no separate confirmati
 |------|------|-----|
 | `single_value_template` | Exactly 1 key selected (non-multiline) | Key stays in template, `$$secret$$` is the value: `password: $$secret$$`. Secret ref holds the raw scalar. |
 | `multi_value_template` | 2+ keys selected, all under the **same parent key**, OR single multiline value detected | Standalone `$$secret$$` block at end of parent. Secret ref holds a pre-indented YAML block with proper literal block scalar (`|`) syntax for multiline values. |
-| `no_template` | 2+ keys selected under **different parent keys**, or `← Full no-template` chosen | New conf linked directly to a secret ref holding the full YAML. No template substitution. |
+| `auto_merge_secrets` | **2+ keys selected under different parent keys** (recommended for cross-parent secrets) | Template contains ALL fields + `secrets: $$secret$$` at root. Secret ref contains ONLY secret fields with full parent structure preserved. At runtime, `configurations/base.rb` auto-merges `secrets:` into base config. **See [PR #763917](https://github.com/instacart/carrot/pull/763917).** |
+| `no_template` (legacy) | Explicitly chosen via "Full monolithic (legacy)" option | New conf linked directly to a secret ref holding the full YAML. No template substitution. **Deprecated in favor of auto_merge_secrets.** |
 | `no_secret` | No keys selected (0 secret-like keys detected), or explicitly chosen | Config stored as **plain YAML** (not a secret ref). No `$$secret$$` substitution. Used for configs that were incorrectly stored as secrets. |
 
 **Note**: If a single-value template is selected but the value is multiline (SSH private keys, certificates, etc.), the tool **automatically upgrades to multi-value template** to ensure proper YAML literal block scalar formatting.
 
-#### Future consideration: Subtree template pattern
+#### Auto-Merge Secrets Pattern (Implemented!)
 
-**Current limitation**: When secrets are under different parent keys (cross-parent secrets), the tool uses `no_template` pattern (entire config becomes monolithic). This means all non-secret fields are included in the secret ref, which isn't ideal.
+**Previous limitation**: When secrets were under different parent keys (cross-parent secrets), the tool used `no_template` pattern (entire config became monolithic). This meant all non-secret fields were included in the secret ref.
 
-**Potential enhancement**: A 4th pattern called `subtree_template` could find the **smallest common ancestor** containing all secrets and make only that subtree the secret:
+**Solution**: The `auto_merge_secrets` pattern provides a clean separation for cross-parent secrets:
 
 ```yaml
-# Example: secrets under different subkeys
-metadata:
-  version: 1.0              # ← Could stay plain
-credentials:
+# Example: secrets under different parents (cross-parent secrets)
+ncr:
   lms:
+    base_url: https://api.example.com
+    username: public_user
     password: secret1       # ← Secret
   api:
+    endpoint: https://api.example.com/v2
     api_key: secret2        # ← Secret
 settings:
-  timeout: 30               # ← Could stay plain
+  timeout: 30
 ```
 
-**With subtree_template:**
-- **Template**: Only `credentials:` section has `$$secret$$`
-- **Secret ref**: Just the `credentials` subtree (includes both secrets + their non-secret siblings)
-- **Benefit**: `metadata` and `settings` stay plain (can be updated without touching secrets)
+**With auto_merge_secrets:**
 
-**Compared to current no_template**: Entire config would be monolithic (including metadata and settings).
+**Template (stored in ISC config):**
+```yaml
+ncr:
+  lms:
+    base_url: https://api.example.com
+    username: public_user
+    password: placeholder_will_be_overridden  # ← Placeholder, overridden at runtime
+  api:
+    endpoint: https://api.example.com/v2
+    api_key: placeholder_will_be_overridden    # ← Placeholder, overridden at runtime
+settings:
+  timeout: 30
+secrets: $$secret$$  # ← ISC substitutes this with secret ref content
+```
 
-**Trade-offs:**
-- ✅ Better granularity than full monolithic
-- ✅ Reduces secret rotation surface area
-- ⚠️ Still includes some non-secrets in the secret block (e.g., URL under `lms`)
-- ⚠️ More complex implementation (ancestor detection, subtree extraction)
-- ⚠️ May not provide significant benefit if secrets are tightly clustered anyway
+**Secret ref (stored separately):**
+```yaml
+ncr:
+  lms:
+    password: secret1
+  api:
+    api_key: secret2
+```
 
-**Decision**: Not implemented yet. Current `no_template` pattern is safer and simpler for initial migration. Can be added later as an optional 4th pattern if there's clear value from real-world configs.
+**At runtime** (in `configurations/base.rb`):
+1. ISC substitutes `$$secret$$` with secret ref content
+2. `configurations/base.rb` extracts the `secrets:` key
+3. Deep merges it into the base settings (secrets override placeholder values)
+4. Final result has all non-secret fields + actual secret values
+
+**Benefits:**
+- ✅ **Clean separation**: Non-secret config in template, only secrets in secret ref
+- ✅ **No monolithic storage**: Unlike legacy `no_template`, secret ref contains ONLY secrets
+- ✅ **Single ISC config**: Only one config per retailer (not two like Option 3)
+- ✅ **Self-documenting**: `secrets: $$secret$$` pattern is clear in ISC UI
+- ✅ **Easy updates**: Change URLs, IDs, timeouts without touching secrets
+- ✅ **Zero plugin changes**: Existing `Current.settings.dig()` calls work unchanged
+
+**Compared to legacy no_template:**
+- `no_template`: Entire config (including metadata, settings, URLs) stored in secret ref → monolithic
+- `auto_merge_secrets`: Only actual secrets stored in secret ref → clean separation
 
 #### Secret ref naming
 
@@ -362,7 +392,8 @@ settings:
 |------|----------------|
 | `single_value_template` | `<CONF_BASE>_<KEY_UPCASE>` (e.g. `…_AUTHENTICATE_PASSWORD`) |
 | `multi_value_template` | `<CONF_BASE>_SECRETS` |
-| `no_template` | reuses existing ref if found; otherwise creates `<CONF_BASE>_SECRETS` |
+| `auto_merge_secrets` | `<CONF_BASE>_SECRETS` |
+| `no_template` (legacy) | reuses existing ref if found; otherwise creates `<CONF_BASE>_SECRETS` |
 | `no_secret` | (none - plain YAML config) |
 
 #### Re-migration (dest conf already exists)
@@ -445,7 +476,15 @@ ruby tmp/3pi_isc_migration/scripts/migrate_multi_value_template.rb \
   --secret-ref OFFERS_V1_..._BOWMANS_SECRETS \
   --environment staging
 
-# No-template
+# Auto-merge secrets (recommended for cross-parent secrets)
+ruby tmp/3pi_isc_migration/scripts/migrate_auto_merge_secrets.rb \
+  --source-conf env/LOYALTY_V1_..._CONFIG \
+  --secret-keys ncr.lms.password,ncr.api.api_key \
+  --new-conf env/LOYALTY_V1_..._CONFIG \
+  --secret-ref LOYALTY_V1_..._CONFIG_SECRETS \
+  --environment staging
+
+# No-template (legacy - deprecated, use auto_merge_secrets instead)
 ruby tmp/3pi_isc_migration/scripts/migrate_no_template.rb \
   --source-conf env/LOYALTY_V1_..._BOWMANS \
   --source-secret-ref env/LOYALTY_V1_..._BOWMANS \

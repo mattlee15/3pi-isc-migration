@@ -13,7 +13,8 @@
 require_relative "common"
 require_relative "migrate_single_value_template"
 require_relative "migrate_multi_value_template"
-require_relative "migrate_no_template"
+require_relative "migrate_auto_merge_secrets"
+require_relative "migrate_no_template"  # Legacy - kept for backward compatibility
 require_relative "migrate_no_secret"
 require "csv"
 
@@ -38,6 +39,11 @@ ENABLE_PERMISSION_CHECK = false
 
 # Session flag: if true, always skip deduplication when creating secret refs
 $skip_dedup_for_session = false
+
+# Session variables for service patterns
+$source_service_pattern = nil
+$dest_service_pattern = nil
+$service_patterns_prompted = false
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -82,8 +88,8 @@ def parallel_env_fetch(conf_name, environments: ALL_ENVIRONMENTS)
 
   threads = environments.map do |env|
     Thread.new do
-      source_raw  = try_read_conf(conf_name, service: SOURCE_SERVICE, environment: env)
-      dest_raw    = try_read_conf(conf_name, service: DEFAULT_SERVICE, environment: env)
+      source_raw  = try_read_conf(conf_name, service: current_source_service, environment: env)
+      dest_raw    = try_read_conf(conf_name, service: current_dest_service, environment: env)
       dest_exists = !dest_raw.nil?
       detail      = dest_raw ? migration_detail_label(conf_name, dest_raw: dest_raw, environment: env) : ""
       mutex.synchronize do
@@ -103,7 +109,7 @@ def suggest_plan(secret_key_paths)
   return :single_value_template if secret_key_paths.length == 1
 
   parents = secret_key_paths.map { |p| p.split(".")[0..-2].join(".") }.uniq
-  parents.length == 1 ? :multi_value_template : :no_template
+  parents.length == 1 ? :multi_value_template : :auto_merge_secrets
 end
 
 def derive_new_conf_name(source_conf)
@@ -119,6 +125,7 @@ def derive_secret_ref_name(source_conf, plan, secret_key: nil)
     elsif plan == :single_value_template
       "SECRET"
     else
+      # multi_value_template, auto_merge_secrets, and no_template all use _SECRETS suffix
       "SECRETS"
     end
   "#{base}_#{suffix}"
@@ -138,7 +145,7 @@ def truncate_ref_name(ref_name, max_length: 60)
 end
 
 def migration_detail_label(conf_name, dest_raw:, environment:)
-  dest_meta = find_conf(conf_name, service: DEFAULT_SERVICE, environment: environment)
+  dest_meta = find_conf(conf_name, service: current_dest_service, environment: environment)
   if dest_meta
     ref_name = dest_meta["secretref"] || dest_meta["secret_ref"] ||
                dest_meta["secretRefName"] || dest_meta["secret_ref_name"] ||
@@ -274,7 +281,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
 
   puts
   if already_migrated
-    puts "  NOTE: This conf already exists in #{DEFAULT_SERVICE} — you may be re-migrating."
+    puts "  NOTE: This conf already exists in #{current_dest_service} — you may be re-migrating."
   end
 
   # Pre-select likely secret keys for the multi-select defaults
@@ -310,15 +317,15 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         }
       end
     end
-    strategy_choices << { name: "Select keys manually",                          value: :manual   }
-    strategy_choices << { name: "Full no-template  (entire conf as secret ref)", value: :full     }
-    strategy_choices << { name: "No secret (plain YAML)",                        value: :no_secret }
-    strategy_choices << { name: "Skip this environment",                         value: :skip     }
+    strategy_choices << { name: "Select keys manually",                               value: :manual   }
+    strategy_choices << { name: "Full monolithic (legacy - entire conf as secret ref)", value: :full     }
+    strategy_choices << { name: "No secret (plain YAML)",                             value: :no_secret }
+    strategy_choices << { name: "Skip this environment",                              value: :skip     }
 
     strategy = $tty.select("Plan:", strategy_choices, cycle: true)
 
     return :skipped                       if strategy == :skip
-    break [all_keys, :no_template]        if strategy == :full
+    break [all_keys, :no_template]        if strategy == :full  # Keep legacy no_template for explicit full monolithic choice
     break [[], :no_secret]                if strategy == :no_secret
     break [likely_secret_keys, suggested_plan] if strategy == :suggested
 
@@ -375,6 +382,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
       case plan
       when :single_value_template then parsed.dig(*secret_key_paths.first.split(".")).to_s
       when :multi_value_template  then build_secret_block(parsed, secret_key_paths)
+      when :auto_merge_secrets    then MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
       when :no_template           then to_yaml_with_literal_blocks(parsed)
       end
 
@@ -498,7 +506,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         MigrateSingleValueTemplate.run(
           parsed: parsed, source_conf: conf_name, secret_key_path: secret_key_paths.first,
           new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
-          environment: environment, dest_service: DEFAULT_SERVICE, report_path: nil,
+          environment: environment, dest_service: current_dest_service, report_path: nil,
           update_secret_ref_name: update_secret_ref_name, skip_dedup: skip_dedup_this_config,
         )
 
@@ -507,7 +515,16 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         MigrateMultiValueTemplate.run(
           parsed: parsed, source_conf: conf_name, secret_key_paths: secret_key_paths,
           new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
-          environment: environment, dest_service: DEFAULT_SERVICE, report_path: nil,
+          environment: environment, dest_service: current_dest_service, report_path: nil,
+          update_secret_ref_name: update_secret_ref_name, skip_dedup: skip_dedup_this_config,
+        )
+
+      when :auto_merge_secrets
+        secret_ref_name = reuse_secret_ref || derive_secret_ref_name(conf_name, plan)
+        MigrateAutoMergeSecrets.run(
+          parsed: parsed, source_conf: conf_name, secret_key_paths: secret_key_paths,
+          new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
+          environment: environment, dest_service: current_dest_service, report_path: nil,
           update_secret_ref_name: update_secret_ref_name, skip_dedup: skip_dedup_this_config,
         )
 
@@ -524,14 +541,14 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         MigrateNoTemplate.run(
           source_conf: conf_name, source_secret_ref_name: no_template_ref,
           new_conf_name: new_conf_name, environment: environment,
-          dest_service: DEFAULT_SERVICE, already_migrated: already_migrated, report_path: nil,
+          dest_service: current_dest_service, already_migrated: already_migrated, report_path: nil,
         )
 
       when :no_secret
         MigrateNoSecret.run(
           parsed: parsed, source_conf: conf_name,
           new_conf_name: new_conf_name, environment: environment,
-          dest_service: DEFAULT_SERVICE, report_path: nil,
+          dest_service: current_dest_service, report_path: nil,
         )
       end
     rescue IscError => e
@@ -555,11 +572,11 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
   end
   puts
 
-  source_still_exists = !try_read_conf(conf_name, service: SOURCE_SERVICE, environment: environment).nil?
+  source_still_exists = !try_read_conf(conf_name, service: current_source_service, environment: environment).nil?
   orig_conf_status =
     if source_still_exists
-      puts "  Removing source conf from #{SOURCE_SERVICE}..."
-      del_success, del_stderr = delete_conf(conf_name, service: SOURCE_SERVICE,
+      puts "  Removing source conf from #{current_source_service}..."
+      del_success, del_stderr = delete_conf(conf_name, service: current_source_service,
                                             environment: environment, ignore_secretref: true)
       if del_success
         puts "    Deleted: #{conf_name}"
@@ -570,7 +587,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         "could not delete (permission denied)"
       end
     else
-      puts "  Source conf already removed from #{SOURCE_SERVICE}."
+      puts "  Source conf already removed from #{current_source_service}."
       "already removed"
     end
   puts
@@ -619,9 +636,42 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
   :success
 end
 
+# Prompt for service patterns on first use
+def prompt_service_patterns
+  return if $service_patterns_prompted
+
+  separator
+  puts "Configure service patterns for this session:"
+  puts "  (Leave blank to use defaults: rpc.integrations.integrations → *.integrations.integrations)"
+  puts
+
+  source = prompt("Source service pattern: ")
+  dest = prompt("Destination service pattern: ")
+
+  $source_service_pattern = source.empty? ? SOURCE_SERVICE : source
+  $dest_service_pattern = dest.empty? ? DEFAULT_SERVICE : dest
+  $service_patterns_prompted = true
+
+  puts
+  puts "Using patterns:"
+  puts "  Source: #{$source_service_pattern}"
+  puts "  Dest:   #{$dest_service_pattern}"
+end
+
+# Get current source service pattern
+def current_source_service
+  $source_service_pattern || SOURCE_SERVICE
+end
+
+# Get current dest service pattern
+def current_dest_service
+  $dest_service_pattern || DEFAULT_SERVICE
+end
+
 # ── Mode 1: Manual by name ─────────────────────────────────────────────────────
 
 def mode_manual
+  prompt_service_patterns
   loop do
     separator
     conf_name = prompt("Conf name (or 'back'): ")
@@ -1304,9 +1354,10 @@ end
 
 puts "=" * 70
 puts "  ISC 3PI Migration Tool"
-puts "  Source:  #{SOURCE_SERVICE}"
-puts "  Dest:    #{DEFAULT_SERVICE}"
-puts "  Report:  #{REPORT_PATH}"
+puts "  Default patterns:"
+puts "    Source: #{SOURCE_SERVICE}"
+puts "    Dest:   #{DEFAULT_SERVICE}"
+puts "  Report: #{REPORT_PATH}"
 puts "=" * 70
 puts
 

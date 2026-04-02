@@ -12,6 +12,14 @@
 
 ## Critical Rules
 
+### Auto-Merge Secrets Pattern - RECOMMENDED
+✅ **Now using auto-merge secrets pattern** - see [PR #763917](https://github.com/instacart/carrot/pull/763917) and [wiki](https://instacart.atlassian.net/wiki/spaces/ENTSO/pages/6481412238)
+- Replaces legacy `no_template` pattern for cross-parent secrets
+- **Template**: ALL fields + `secrets: $$secret$$` at root
+- **Secret ref**: ONLY secret fields with parent structure preserved
+- **Runtime**: `configurations/base.rb` auto-merges `secrets:` into base config
+- **Benefits**: Clean separation, single ISC config, zero plugin changes
+
 ### ISC CLI Restrictions
 ⚠️ **NEVER run `isc secretref create/update` or `isc conf set` commands via bash/shell execution in AI agent mode.**
 - These commands detect AI contexts and WILL fail
@@ -61,7 +69,9 @@
     ├── common.rb                # Shared ISC helpers
     ├── migrate_single_value_template.rb
     ├── migrate_multi_value_template.rb
-    ├── migrate_no_template.rb
+    ├── migrate_auto_merge_secrets.rb   # Option 2.5 - RECOMMENDED
+    ├── migrate_no_template.rb          # Legacy - deprecated
+    ├── migrate_no_secret.rb
     └── test_*.rb                # Test scripts
 ```
 
@@ -81,7 +91,8 @@
 |---------|----------|---------|
 | **single_value_template** | 1 secret field (non-multiline) | `password: $$secret$$` |
 | **multi_value_template** | 2+ fields under same parent, OR 1 multiline field | Standalone `$$secret$$` block with YAML literal scalar (`\|`) for multiline |
-| **no_template** | Fields under different parents | Entire conf linked to secret ref |
+| **auto_merge_secrets** | **Fields under different parents (RECOMMENDED)** | Template: ALL fields + `secrets: $$secret$$`; Secret ref: only secrets with parent structure |
+| **no_template** (legacy) | Full monolithic - deprecated | Entire conf linked to secret ref |
 
 ### Multiline Values (SSH Keys, Certs)
 - ⚠️ Single-value templates CANNOT handle multiline → auto-upgrade to multi-value
