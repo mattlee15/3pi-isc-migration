@@ -274,8 +274,13 @@ end
 
 # Fix YAML with unquoted values that start with YAML indicator characters.
 # This handles cases where values like ",abc" or "[test]" cause parse errors.
+# Also converts literal ↵ (Unicode U+21B5) symbols to actual newlines.
 # Returns sanitized YAML string that can be safely parsed.
 def sanitize_yaml(yaml_string)
+  # First, replace literal ↵ symbols with actual newlines
+  # This handles cases where ISC stores the return symbol instead of \n
+  yaml_string = yaml_string.gsub('↵', "\n")
+
   lines = yaml_string.lines
   fixed_lines = lines.map do |line|
     # Match pattern: key: value (where value starts with special char)
