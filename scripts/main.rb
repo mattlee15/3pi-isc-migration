@@ -373,6 +373,11 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
   new_conf_name = derive_new_conf_name(conf_name)
   puts "  New conf name: #{new_conf_name}"
 
+  # Detect if we're updating in place (same service and same name)
+  if current_source_service == current_dest_service
+    puts "  Note: Updating config in place (source and destination are the same)"
+  end
+
   # For no_secret plan, skip all secret-related lookups
   if plan == :no_secret
     puts "  Note: Config will be stored as plain YAML (no secret ref)"
@@ -572,24 +577,30 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
   end
   puts
 
-  source_still_exists = !try_read_conf(conf_name, service: current_source_service, environment: environment).nil?
-  orig_conf_status =
-    if source_still_exists
-      puts "  Removing source conf from #{current_source_service}..."
-      del_success, del_stderr = delete_conf(conf_name, service: current_source_service,
-                                            environment: environment, ignore_secretref: true)
-      if del_success
-        puts "    Deleted: #{conf_name}"
-        "deleted"
+  # Skip source deletion if source and dest are the same service
+  if current_source_service == current_dest_service
+    puts "  Source and destination are the same service — skipping source deletion."
+    orig_conf_status = "skipped (same service as destination)"
+  else
+    source_still_exists = !try_read_conf(conf_name, service: current_source_service, environment: environment).nil?
+    orig_conf_status =
+      if source_still_exists
+        puts "  Removing source conf from #{current_source_service}..."
+        del_success, del_stderr = delete_conf(conf_name, service: current_source_service,
+                                              environment: environment, ignore_secretref: true)
+        if del_success
+          puts "    Deleted: #{conf_name}"
+          "deleted"
+        else
+          puts "    WARNING: Could not delete #{conf_name} — #{del_stderr.strip}"
+          puts "             Delete manually when you have permission."
+          "could not delete (permission denied)"
+        end
       else
-        puts "    WARNING: Could not delete #{conf_name} — #{del_stderr.strip}"
-        puts "             Delete manually when you have permission."
-        "could not delete (permission denied)"
+        puts "  Source conf already removed from #{current_source_service}."
+        "already removed"
       end
-    else
-      puts "  Source conf already removed from #{current_source_service}."
-      "already removed"
-    end
+  end
   puts
 
   orig_secret_status =
