@@ -14,7 +14,6 @@ require_relative "common"
 require_relative "migrate_single_value_template"
 require_relative "migrate_multi_value_template"
 require_relative "migrate_auto_merge_secrets"
-require_relative "migrate_no_template"  # Legacy - kept for backward compatibility
 require_relative "migrate_no_secret"
 require "csv"
 
@@ -125,7 +124,7 @@ def derive_secret_ref_name(source_conf, plan, secret_key: nil)
     elsif plan == :single_value_template
       "SECRET"
     else
-      # multi_value_template, auto_merge_secrets, and no_template all use _SECRETS suffix
+      # multi_value_template and auto_merge_secrets use _SECRETS suffix
       "SECRETS"
     end
   "#{base}_#{suffix}"
@@ -318,14 +317,12 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
       end
     end
     strategy_choices << { name: "Select keys manually",                               value: :manual   }
-    strategy_choices << { name: "Full monolithic (legacy - entire conf as secret ref)", value: :full     }
     strategy_choices << { name: "No secret (plain YAML)",                             value: :no_secret }
     strategy_choices << { name: "Skip this environment",                              value: :skip     }
 
     strategy = $tty.select("Plan:", strategy_choices, cycle: true)
 
     return :skipped                       if strategy == :skip
-    break [all_keys, :no_template]        if strategy == :full  # Keep legacy no_template for explicit full monolithic choice
     break [[], :no_secret]                if strategy == :no_secret
     break [likely_secret_keys, suggested_plan] if strategy == :suggested
 
@@ -353,7 +350,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
 
   # Check if any selected secret values contain newlines (multiline secrets like SSH keys)
   # Single-value templates can't handle multiline values, so upgrade to multi-value template
-  unless plan == :no_template || plan == :no_secret
+  unless plan == :no_secret
     multiline_keys = secret_key_paths.select do |key_path|
       value = parsed.dig(*key_path.split("."))
       value.is_a?(String) && value.include?("\n")
@@ -388,7 +385,6 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
       when :single_value_template then parsed.dig(*secret_key_paths.first.split(".")).to_s
       when :multi_value_template  then build_secret_block(parsed, secret_key_paths)
       when :auto_merge_secrets    then MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
-      when :no_template           then to_yaml_with_literal_blocks(parsed)
       end
 
     # reuse_secret_ref: an existing secret ref whose value exactly matches what we
@@ -484,7 +480,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
   # When re-migrating an already-migrated conf, find the existing secret ref linked to
   # the dest conf and decide whether to update it in place (single-linked) or create a new one.
   update_secret_ref_name = nil
-  if already_migrated && plan != :no_template
+  if already_migrated && plan != :no_secret
     loading("Checking existing dest secret ref") do
       derived_ref = derive_secret_ref_name(conf_name, plan, secret_key: secret_key_paths.first)
       existing_ref = find_secret_ref(derived_ref, environment: environment)
@@ -531,22 +527,6 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
           new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
           environment: environment, dest_service: current_dest_service, report_path: nil,
           update_secret_ref_name: update_secret_ref_name, skip_dedup: skip_dedup_this_config,
-        )
-
-      when :no_template
-        no_template_ref = reuse_secret_ref || cleanup_secret_ref
-        unless no_template_ref
-          # Conf has no existing secret ref (was stored as plain YAML) — create one
-          # holding the full YAML so the new conf can be linked to it.
-          # Use the parsed (and SSH-key-fixed) version converted back to YAML
-          new_ref_name = derive_secret_ref_name(conf_name, :multi_value_template)
-          puts "  No existing secret ref — creating: #{new_ref_name}"
-          no_template_ref = create_or_find_secret_ref(new_ref_name, secret_value_to_store, environment: environment, skip_dedup: skip_dedup_this_config)
-        end
-        MigrateNoTemplate.run(
-          source_conf: conf_name, source_secret_ref_name: no_template_ref,
-          new_conf_name: new_conf_name, environment: environment,
-          dest_service: current_dest_service, already_migrated: already_migrated, report_path: nil,
         )
 
       when :no_secret
@@ -621,7 +601,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         "no existing secret ref found"
       end
     elsif cleanup_secret_ref && cleanup_secret_ref == migration_result[:secret_ref_used]
-      # no_template reuses the original secret ref for the new conf — must not delete it
+      # Migration reused the original secret ref for the new conf — must not delete it
       puts "  Secret ref #{cleanup_secret_ref} preserved — now linked to new conf."
       "preserved (reused by new conf)"
     elsif cleanup_secret_ref

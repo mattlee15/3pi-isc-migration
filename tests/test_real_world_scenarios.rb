@@ -336,8 +336,8 @@ class TestRealWorldScenarios < Minitest::Test
       }
     }
 
-    # This would be no_template pattern due to cross-structure secrets
-    # But we can verify YAML generation preserves structure
+    # This would use auto_merge_secrets pattern for cross-structure secrets
+    # Verify YAML generation preserves structure
     yaml_output = to_yaml_with_literal_blocks(parsed)
     reparsed = YAML.safe_load(yaml_output)
 
@@ -374,7 +374,7 @@ class TestRealWorldScenarios < Minitest::Test
       "legacy_config" => yaml_string
     }
 
-    # This would typically be a no_template scenario
+    # Testing YAML string preservation (for configs with embedded YAML)
     yaml_output = to_yaml_with_literal_blocks(parsed)
     reparsed = YAML.safe_load(yaml_output)
 

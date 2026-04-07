@@ -64,32 +64,35 @@ Remaining Work: ~11% (48/446)
 
 ### Pattern Distribution Insights
 
-**Why No-Template Pattern? (38.7% of migrated configs)**
+**Historical Context: No-Template Pattern (38.7% of migrated configs)**
 
-The 154 configs using **no-template** pattern fall into these categories:
+The 154 configs initially migrated using **no-template** pattern (entire config as monolithic secret ref) were primarily configs with **cross-parent secrets** - secret fields under different parent keys.
 
-1. **Cross-Parent Secrets** (most common): Secret fields under different parent keys
+**These configs can now be re-migrated using the `auto_merge_secrets` pattern** for better separation:
+
    ```yaml
-   # Can't template - secrets under different parents
+   # Cross-parent secrets - NOW SUPPORTED with auto_merge_secrets
    birdzi:
      api_key: "secret1"     # ← Under birdzi
    lms:
      password: "secret2"    # ← Under lms
-   # Solution: Store entire config as secret ref
+   # NEW Solution: Use auto_merge_secrets pattern (template + secrets: key)
    ```
 
-2. **User Preference**: Operator chose "Full no-template" for simplicity
+2. **User Preference**: Operator chose "Full monolithic" during initial migration for simplicity
 3. **Legacy Compatibility**: Minimal disruption for existing integrations
+
+> **Note**: The `no_template` pattern has been deprecated in favor of `auto_merge_secrets`. Existing monolithic configs can be re-migrated to use the new pattern for better secret separation.
 
 **Template Adoption by Service:**
 
 * **Loyalty Card: 91.5%** - Highest adoption, cleanly structured secrets under single parent
 * **Loyalty Points: 63.5%** - Moderate adoption, some cross-parent secrets
-* **Offers: 41.7%** - Lower adoption due to complex config structures
+* **Offers: 41.7%** - Lower adoption (can now be improved with auto_merge_secrets)
 
 **Security Benefits:**
 
-All 398 migrated configs (template + no-template) benefit from:
+All 398 migrated configs benefit from:
 * ✅ Separation from monolithic storage in `rpc.integrations.integrations`
 * ✅ Dedicated secret refs with proper ISC permissions
 * ✅ Independent secret rotation capability
@@ -176,14 +179,12 @@ Use this to migrate a single conf by name (ad-hoc, for testing or one-offs).
    Plan:
    ‣ multi value template  ←  lms.authenticate_password, lms.api_key  (suggested)
      Select keys manually
-     Full no-template  (entire conf as secret ref)
      No secret (plain YAML)
      Skip this environment
    ```
 
    - **Suggested plan**: Auto-derived from detected secret-like keys (pre-selected for convenience)
    - **Select keys manually**: Choose specific keys, then plan is auto-derived
-   - **Full no-template**: Link entire config to a secret ref (no `$$secret$$` substitution)
    - **No secret (plain YAML)**: Store config as plain YAML with no secret ref (for non-secret configs)
    - **Skip this environment**: Skip migration for this environment
 
@@ -317,7 +318,6 @@ The plan is **auto-derived** from the keys you select — no separate confirmati
 | `single_value_template` | Exactly 1 key selected (non-multiline) | Key stays in template, `$$secret$$` is the value: `password: $$secret$$`. Secret ref holds the raw scalar. |
 | `multi_value_template` | 2+ keys selected, all under the **same parent key**, OR single multiline value detected | Standalone `$$secret$$` block at end of parent. Secret ref holds a pre-indented YAML block with proper literal block scalar (`|`) syntax for multiline values. |
 | `auto_merge_secrets` | **2+ keys selected under different parent keys** (recommended for cross-parent secrets) | Template contains ALL fields + `secrets: $$secret$$` at root. Secret ref contains ONLY secret fields with full parent structure preserved. At runtime, `configurations/base.rb` auto-merges `secrets:` into base config. **See [PR #763917](https://github.com/instacart/carrot/pull/763917).** |
-| `no_template` (legacy) | Explicitly chosen via "Full monolithic (legacy)" option | New conf linked directly to a secret ref holding the full YAML. No template substitution. **Deprecated in favor of auto_merge_secrets.** |
 | `no_secret` | No keys selected (0 secret-like keys detected), or explicitly chosen | Config stored as **plain YAML** (not a secret ref). No `$$secret$$` substitution. Used for configs that were incorrectly stored as secrets. |
 
 **Note**: If a single-value template is selected but the value is multiline (SSH private keys, certificates, etc.), the tool **automatically upgrades to multi-value template** to ensure proper YAML literal block scalar formatting.
@@ -393,7 +393,6 @@ ncr:
 | `single_value_template` | `<CONF_BASE>_<KEY_UPCASE>` (e.g. `…_AUTHENTICATE_PASSWORD`) |
 | `multi_value_template` | `<CONF_BASE>_SECRETS` |
 | `auto_merge_secrets` | `<CONF_BASE>_SECRETS` |
-| `no_template` (legacy) | reuses existing ref if found; otherwise creates `<CONF_BASE>_SECRETS` |
 | `no_secret` | (none - plain YAML config) |
 
 #### Re-migration (dest conf already exists)
@@ -407,7 +406,7 @@ If the conf already exists in `*.integrations.integrations`, the tool updates it
 Error: attempted to confirm but input was not a TTY
 ```
 
-ISC provides no `--force` or `--yes` flag to bypass this prompt. **Workaround**: The tool automatically deletes the existing config first, then creates the new one. This applies to all migration patterns (single-value, multi-value, no-template, no-secret) when re-migrating. You'll see:
+ISC provides no `--force` or `--yes` flag to bypass this prompt. **Workaround**: The tool automatically deletes the existing config first, then creates the new one. This applies to all migration patterns when re-migrating. You'll see:
 ```
 (Deleting existing conf to avoid confirmation prompt)
 ```
@@ -482,13 +481,6 @@ ruby tmp/3pi_isc_migration/scripts/migrate_auto_merge_secrets.rb \
   --secret-keys ncr.lms.password,ncr.api.api_key \
   --new-conf env/LOYALTY_V1_..._CONFIG \
   --secret-ref LOYALTY_V1_..._CONFIG_SECRETS \
-  --environment staging
-
-# No-template (legacy - deprecated, use auto_merge_secrets instead)
-ruby tmp/3pi_isc_migration/scripts/migrate_no_template.rb \
-  --source-conf env/LOYALTY_V1_..._BOWMANS \
-  --source-secret-ref env/LOYALTY_V1_..._BOWMANS \
-  --new-conf env/LOYALTY_V1_..._BOWMANS \
   --environment staging
 
 # No-secret (plain YAML)

@@ -69,8 +69,7 @@
     ├── common.rb                # Shared ISC helpers
     ├── migrate_single_value_template.rb
     ├── migrate_multi_value_template.rb
-    ├── migrate_auto_merge_secrets.rb   # Option 2.5 - RECOMMENDED
-    ├── migrate_no_template.rb          # Legacy - deprecated
+    ├── migrate_auto_merge_secrets.rb   # RECOMMENDED for cross-parent secrets
     ├── migrate_no_secret.rb
     └── test_*.rb                # Test scripts
 ```
@@ -92,7 +91,7 @@
 | **single_value_template** | 1 secret field (non-multiline) | `password: $$secret$$` |
 | **multi_value_template** | 2+ fields under same parent, OR 1 multiline field | Standalone `$$secret$$` block with YAML literal scalar (`\|`) for multiline |
 | **auto_merge_secrets** | **Fields under different parents (RECOMMENDED)** | Template: ALL fields + `secrets: $$secret$$`; Secret ref: only secrets with parent structure |
-| **no_template** (legacy) | Full monolithic - deprecated | Entire conf linked to secret ref |
+| **no_secret** | No secrets detected | Plain YAML config (no secret ref) |
 
 ### Multiline Values (SSH Keys, Certs)
 - ⚠️ Single-value templates CANNOT handle multiline → auto-upgrade to multi-value
@@ -257,7 +256,6 @@ All tests verify:
 # Test each migration pattern on staging
 ruby tmp/3pi_isc_migration/scripts/test_migrate_single_value_template.rb
 ruby tmp/3pi_isc_migration/scripts/test_migrate_multi_value_template.rb
-ruby tmp/3pi_isc_migration/scripts/test_migrate_no_template.rb
 ```
 
 ### Runtime Merge Testing
