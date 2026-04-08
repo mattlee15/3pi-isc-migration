@@ -126,6 +126,16 @@ existing = find_secret_ref_by_value(value, environment: environment)
 # Reuse if found, otherwise create new
 ```
 
+### Secret Ref Naming and Versioning
+When re-migrating a config and the existing secret ref has multiple linked configs:
+- Script generates unique name by appending `_V2`, `_V3`, etc.
+- Tries incrementing versions until finding an unused name
+- Fallback to timestamp if all versions exist (unlikely)
+```ruby
+# Example: HERITAGE_GROCERS_GROUP_SECRETS exists with 3 linked configs
+# → Creates: HERITAGE_GROCERS_GROUP_SECRETS_V2
+```
+
 ---
 
 ## Code Patterns

@@ -130,6 +130,21 @@ def derive_secret_ref_name(source_conf, plan, secret_key: nil)
   "#{base}_#{suffix}"
 end
 
+# Generate a unique secret ref name by appending _V2, _V3, etc. if the base name exists
+def derive_unique_secret_ref_name(base_name, environment:)
+  # If base name doesn't exist, use it
+  return base_name unless find_secret_ref(base_name, environment: environment)
+
+  # Try _V2, _V3, _V4, etc.
+  (2..99).each do |version|
+    candidate = "#{base_name}_V#{version}"
+    return candidate unless find_secret_ref(candidate, environment: environment)
+  end
+
+  # Fallback to timestamp if all versions exist (unlikely)
+  "#{base_name}_#{Time.now.strftime('%Y%m%d%H%M%S')}"
+end
+
 # Returns a detail label describing how an already-migrated dest conf is set up.
 #
 # Detection order:
@@ -480,6 +495,7 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
   # When re-migrating an already-migrated conf, find the existing secret ref linked to
   # the dest conf and decide whether to update it in place (single-linked) or create a new one.
   update_secret_ref_name = nil
+  force_new_unique_name = false
   if already_migrated && plan != :no_secret
     loading("Checking existing dest secret ref") do
       derived_ref = derive_secret_ref_name(conf_name, plan, secret_key: secret_key_paths.first)
@@ -490,7 +506,8 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
           update_secret_ref_name = derived_ref
           puts "  Found secret ref: #{derived_ref} (#{linked.length} linked — will update in place)"
         else
-          puts "  Found secret ref: #{derived_ref} (#{linked.length} linked confs — will create new ref)"
+          force_new_unique_name = true
+          puts "  Found secret ref: #{derived_ref} (#{linked.length} linked confs — will create new ref with unique name)"
         end
       else
         puts "  No existing secret ref found — will create new ref"
@@ -501,9 +518,18 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
 
   migration_result =
     begin
+      # Show unique name generation message if needed
+      if force_new_unique_name && !reuse_secret_ref
+        base_name = derive_secret_ref_name(conf_name, plan, secret_key: secret_key_paths&.first)
+        unique_name = derive_unique_secret_ref_name(base_name, environment: environment)
+        puts "  → Creating new secret ref with unique name: #{unique_name}"
+        puts
+      end
+
       case plan
       when :single_value_template
-        secret_ref_name = reuse_secret_ref || derive_secret_ref_name(conf_name, plan, secret_key: secret_key_paths.first)
+        base_name = derive_secret_ref_name(conf_name, plan, secret_key: secret_key_paths.first)
+        secret_ref_name = reuse_secret_ref || (force_new_unique_name ? derive_unique_secret_ref_name(base_name, environment: environment) : base_name)
         MigrateSingleValueTemplate.run(
           parsed: parsed, source_conf: conf_name, secret_key_path: secret_key_paths.first,
           new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
@@ -512,7 +538,8 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         )
 
       when :multi_value_template
-        secret_ref_name = reuse_secret_ref || derive_secret_ref_name(conf_name, plan)
+        base_name = derive_secret_ref_name(conf_name, plan)
+        secret_ref_name = reuse_secret_ref || (force_new_unique_name ? derive_unique_secret_ref_name(base_name, environment: environment) : base_name)
         MigrateMultiValueTemplate.run(
           parsed: parsed, source_conf: conf_name, secret_key_paths: secret_key_paths,
           new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
@@ -521,7 +548,8 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         )
 
       when :auto_merge_secrets
-        secret_ref_name = reuse_secret_ref || derive_secret_ref_name(conf_name, plan)
+        base_name = derive_secret_ref_name(conf_name, plan)
+        secret_ref_name = reuse_secret_ref || (force_new_unique_name ? derive_unique_secret_ref_name(base_name, environment: environment) : base_name)
         MigrateAutoMergeSecrets.run(
           parsed: parsed, source_conf: conf_name, secret_key_paths: secret_key_paths,
           new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
