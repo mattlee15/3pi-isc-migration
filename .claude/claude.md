@@ -198,7 +198,12 @@ mark_migrated_in_csv!(csv_path, conf_name, environment)
 
 ### SSH Key Detection
 - `looks_like_private_key?(value)` - Detects `-----BEGIN ... PRIVATE KEY-----`
-- `to_yaml_with_literal_blocks(hash)` - Formats with `|` for multiline
+- `to_yaml_with_literal_blocks(hash)` - Formats with `|` for multiline, auto-quotes URLs
+
+### URL Quoting (Automatic)
+- `to_yaml_with_literal_blocks()` automatically quotes URLs containing `://`
+- Prevents YAML parsing errors from unquoted `https://` or `http://` values
+- Example: `base_url: 'https://api.example.com'` (single-quoted)
 
 ---
 
