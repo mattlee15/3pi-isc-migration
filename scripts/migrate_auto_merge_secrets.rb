@@ -99,18 +99,37 @@ module MigrateAutoMergeSecrets
     secret_key_paths.each do |path|
       parts = path.split(".")
 
-      if parts.length == 1
+      # Determine actual key types from original parsed config
+      # YAML parses numeric keys as integers, we need to preserve that
+      actual_keys = []
+      current_level = parsed
+      parts.each do |part|
+        # Check if this level has an integer key matching the string
+        if current_level.is_a?(Hash) && part.match?(/^\d+$/) && current_level.key?(part.to_i)
+          actual_keys << part.to_i
+          current_level = current_level[part.to_i]
+        elsif current_level.is_a?(Hash) && current_level.key?(part)
+          actual_keys << part
+          current_level = current_level[part]
+        else
+          # Fallback to string if we can't determine
+          actual_keys << part
+          current_level = current_level&.dig(part)
+        end
+      end
+
+      if actual_keys.length == 1
         # Top-level secret
-        template_hash.delete(parts[0])
+        template_hash.delete(actual_keys[0])
       else
         # Navigate to parent and delete the leaf key
-        parent = template_hash.dig(*parts[0..-2])
-        parent&.delete(parts[-1])
+        parent = template_hash.dig(*actual_keys[0..-2])
+        parent&.delete(actual_keys[-1])
 
         # Walk back up the tree and remove any parents that are now empty
         # (only parents that became empty from removing this secret)
-        (parts.length - 2).downto(0) do |i|
-          current_path = parts[0..i]
+        (actual_keys.length - 2).downto(0) do |i|
+          current_path = actual_keys[0..i]
           current_node = template_hash.dig(*current_path)
 
           # If this node is now empty, remove it from its parent
@@ -155,15 +174,35 @@ module MigrateAutoMergeSecrets
 
     secret_key_paths.each do |path|
       parts = path.split(".")
-      value = parsed.dig(*parts)
 
-      # Build nested structure: traverse from root to leaf
-      current = secrets_hash
-      parts[0..-2].each do |part|
-        current[part] ||= {}
-        current = current[part]
+      # Determine actual key types from original parsed config
+      # YAML parses numeric keys as integers, we need to preserve that
+      actual_keys = []
+      current_level = parsed
+      parts.each do |part|
+        # Check if this level has an integer key matching the string
+        if current_level.is_a?(Hash) && part.match?(/^\d+$/) && current_level.key?(part.to_i)
+          actual_keys << part.to_i
+          current_level = current_level[part.to_i]
+        elsif current_level.is_a?(Hash) && current_level.key?(part)
+          actual_keys << part
+          current_level = current_level[part]
+        else
+          # Fallback to string if we can't determine
+          actual_keys << part
+          current_level = current_level&.dig(part)
+        end
       end
-      current[parts.last] = value
+
+      value = parsed.dig(*actual_keys)
+
+      # Build nested structure: traverse from root to leaf using actual key types
+      current = secrets_hash
+      actual_keys[0..-2].each do |key|
+        current[key] ||= {}
+        current = current[key]
+      end
+      current[actual_keys.last] = value
     end
 
     # Convert to YAML with literal block scalars for multiline strings (SSH keys, certs)

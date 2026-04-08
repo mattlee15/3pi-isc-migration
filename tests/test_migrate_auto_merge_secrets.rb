@@ -594,4 +594,51 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     merged = simulate_runtime_merge(template, secret_value)
     assert_equal parsed, merged
   end
+
+  # Edge case: numeric keys (YAML parses as integers, not strings)
+  def test_numeric_keys
+    parsed = {
+      9176 => {  # Integer key
+        "client_id" => "client-es",
+        "client_secret" => "secret1",
+        "endpoint" => "https://es.example.com"
+      },
+      9177 => {  # Integer key
+        "client_id" => "client-fr",
+        "client_secret" => "secret2",
+        "endpoint" => "https://fr.example.com"
+      },
+      "common" => {
+        "timeout" => 30
+      }
+    }
+
+    secret_key_paths = ["9176.client_secret", "9177.client_secret"]
+
+    template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
+    secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Template should preserve non-secret fields under integer keys
+    assert_match(/9176:/, template)
+    assert_match(/9177:/, template)
+    assert_match(/client_id: client-es/, template)
+    assert_match(/client_id: client-fr/, template)
+    assert_match(/endpoint: https:\/\/es\.example\.com/, template)
+    assert_match(/endpoint: https:\/\/fr\.example\.com/, template)
+    assert_match(/timeout: 30/, template)
+    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+
+    # Template should NOT have secret fields
+    refute_match(/client_secret:/, template)
+
+    # Verify runtime merge produces correct result with integer keys preserved
+    merged = simulate_runtime_merge(template, secret_value)
+    assert_equal parsed, merged
+
+    # Specifically verify integer keys are preserved (not converted to strings)
+    assert merged.key?(9176), "Merged hash should have integer key 9176"
+    assert merged.key?(9177), "Merged hash should have integer key 9177"
+    refute merged.key?("9176"), "Merged hash should NOT have string key '9176'"
+    refute merged.key?("9177"), "Merged hash should NOT have string key '9177'"
+  end
 end
