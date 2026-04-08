@@ -63,8 +63,15 @@ class TestYamlSanitization < Minitest::Test
 
     result = sanitize_yaml(yaml)
 
-    # Should not modify valid YAML
-    assert_equal yaml, result
+    # URLs should be quoted to prevent parsing issues with strict YAML parsers
+    assert_match(/url: 'https:\/\/example\.com'/, result)
+    # Other values should remain unchanged
+    assert_match(/normal_value: abc123/, result)
+    assert_match(/number: 42/, result)
+
+    # Should be parseable
+    parsed = YAML.safe_load(result)
+    assert_equal "https://example.com", parsed["config"]["url"]
   end
 
   def test_sanitize_multiple_problematic_values

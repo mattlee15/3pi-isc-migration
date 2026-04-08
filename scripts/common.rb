@@ -283,20 +283,33 @@ def sanitize_yaml(yaml_string)
 
   lines = yaml_string.lines
   fixed_lines = lines.map do |line|
-    # Match pattern: key: value (where value starts with special char)
-    # Only fix if value is not already quoted and starts with YAML indicator
-    if line.match?(/^(\s*)([a-zA-Z_][\w-]*):(\s+)([,\[\]\{\}])/)
-      line.sub(/^(\s*)([a-zA-Z_][\w-]*):(\s+)(.+)$/) do
-        indent = $1
-        key = $2
-        spacing = $3
-        value = $4.chomp
-        # Quote the value if it starts with YAML special chars and isn't already quoted
-        if value.match?(/^[,\[\]\{\}]/) && !value.match?(/^["']/)
-          "#{indent}#{key}:#{spacing}\"#{value}\"\n"
-        else
-          line
-        end
+    # Match pattern: key: value (with at least one character in value)
+    match = line.match(/^(\s*)([a-zA-Z_][\w-]*):(\s+)(.+)$/)
+
+    if match
+      indent = match[1]
+      key = match[2]
+      spacing = match[3]
+      value = match[4].chomp  # Remove any trailing newline
+      line_ending = line.end_with?("\n") ? "\n" : ""
+
+      # Skip if already quoted
+      if value.match?(/^["']/)
+        line
+      # Skip if it's a complete YAML array/object in square brackets or braces
+      # (e.g., [1, 2, 3] or {key: value} or ["a", "b"])
+      elsif value.match?(/^[\[\{].*[\]\}]$/)
+        line
+      # Quote URLs containing :// (e.g., https://example.com)
+      # Some YAML parsers (like Ruby 3.x safe_load) are strict about unquoted colons
+      elsif value.include?('://')
+        "#{indent}#{key}:#{spacing}'#{value}'#{line_ending}"
+      # Quote values starting with YAML special chars that could cause parsing issues
+      # (e.g., ,abc or [test or {data - incomplete/malformed)
+      elsif value.match?(/^[,\[\]\{\}]/)
+        "#{indent}#{key}:#{spacing}\"#{value}\"#{line_ending}"
+      else
+        line
       end
     else
       line
