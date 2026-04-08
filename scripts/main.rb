@@ -299,7 +299,11 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
   end
 
   # Pre-select likely secret keys for the multi-select defaults
-  likely_secret_keys = all_keys.select { |k| k.split(".").last.downcase.match?(/secret|password|key|token|signature/) }
+  # Exclude fields containing "path" (e.g., token_path, key_path) as they're typically file paths, not secrets
+  likely_secret_keys = all_keys.select do |k|
+    field_name = k.split(".").last.downcase
+    field_name.match?(/secret|password|key|token|signature/) && !field_name.include?("path")
+  end
   suggested_plan     = likely_secret_keys.any? ? suggest_plan(likely_secret_keys) : :no_secret
 
   # Key choices for manual selection (no :full mixed in — kept as a separate strategy)

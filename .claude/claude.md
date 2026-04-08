@@ -221,9 +221,12 @@ Both when reading and generating configs:
 3. Check source vs dest exists → use correct labels in status display
 
 ### Add New Secret Keyword
-Update line ~95 in `main.rb`:
+Update the secret detection logic (around line 302) in `main.rb`:
 ```ruby
-likely_secret = key.match?(/secret|password|key|token|signature/i)
+likely_secret_keys = all_keys.select do |k|
+  field_name = k.split(".").last.downcase
+  field_name.match?(/secret|password|key|token|signature/) && !field_name.include?("path")
+end
 ```
 
 ---
@@ -327,6 +330,8 @@ ruby scripts/test_runtime_merge.rb
 
 ### Secret Keywords (auto-detected)
 `secret`, `password`, `key`, `token`, `signature`
+
+**Exclusions:** Fields containing `path` (e.g., `token_path`, `key_path`) are NOT treated as secrets since they're typically file paths or URLs.
 
 ### Service Prefixes
 - Loyalty Card: `LOYALTY_V1_LOYALTY_CARD_SERVICE_CONFIGURATIONS_`
