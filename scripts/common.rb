@@ -371,6 +371,34 @@ end
 
 # Convert hash to YAML with literal block scalars for multiline strings
 # This ensures SSH keys are formatted with | syntax
+# Quote a scalar value if it contains YAML special characters that could break parsing
+# Used for single-value secret refs to ensure ISC substitution produces valid YAML
+def quote_scalar_if_needed(value)
+  return value if value.nil?
+
+  str = value.to_s
+
+  # Already quoted - return as-is
+  return str if str.match?(/^["'].*["']$/)
+
+  # Needs quoting if:
+  # 1. Starts with YAML special chars: , [ ] { } : # & * ! | > ' " % @ `
+  # 2. Contains unescaped : (colon) that could be interpreted as key-value separator
+  # 3. Is a reserved word: true, false, null, yes, no, on, off
+  # Note: We don't quote pure numbers - if the value is numeric, let it be parsed as such
+  needs_quoting = str.match?(/^[,\[\]\{\}:#&*!|>'"%@`]/) ||
+                  str.match?(/:\s/) ||
+                  str.match?(/^(true|false|null|yes|no|on|off)$/i)
+
+  if needs_quoting
+    # Use single quotes (simpler, no escape sequences needed except for single quotes)
+    # Escape any single quotes in the value by doubling them: ' becomes ''
+    "'#{str.gsub("'", "''")}'"
+  else
+    str
+  end
+end
+
 def to_yaml_with_literal_blocks(hash)
   # Use Psych to generate YAML with specific options:
   # - line_width: -1 disables line wrapping

@@ -51,21 +51,25 @@ module MigrateSingleValueTemplate
     puts "  Template:"
     puts template.gsub(/^/, "    ")
 
+    # Quote secret value if needed (for values with YAML special characters)
+    # This ensures ISC substitution produces valid YAML
+    quoted_secret_value = quote_scalar_if_needed(secret_value)
+
     # Create, update, or reuse secret ref
     used_secretref =
       if update_secret_ref_name
         linked = find_linked_confs_for_secret_ref(update_secret_ref_name, environment: environment)
         if linked.length <= 1
           puts "  Updating existing secret ref: #{update_secret_ref_name}"
-          update_secret_ref(update_secret_ref_name, secret_value.to_s, environment: environment)
+          update_secret_ref(update_secret_ref_name, quoted_secret_value, environment: environment)
           update_secret_ref_name
         else
           puts "  Existing secret ref linked to #{linked.length} confs — creating new one"
-          create_or_find_secret_ref(secret_ref_name, secret_value.to_s, environment: environment, skip_dedup: skip_dedup)
+          create_or_find_secret_ref(secret_ref_name, quoted_secret_value, environment: environment, skip_dedup: skip_dedup)
         end
       else
         puts "  Creating/finding secret ref: #{secret_ref_name}"
-        create_or_find_secret_ref(secret_ref_name, secret_value.to_s, environment: environment, skip_dedup: skip_dedup)
+        create_or_find_secret_ref(secret_ref_name, quoted_secret_value, environment: environment, skip_dedup: skip_dedup)
       end
     puts
 
