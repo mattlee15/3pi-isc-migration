@@ -366,7 +366,12 @@ def to_yaml_with_literal_blocks(hash)
   yaml_str = YAML.dump(hash, line_width: -1, indentation: 2)
 
   # Remove the document start marker (---) if present
-  yaml_str.sub(/\A---\n/, "")
+  yaml_str = yaml_str.sub(/\A---\n/, "")
+
+  # Post-process: ensure URLs with :// are quoted to prevent YAML parsing issues
+  # Match lines like: "  key: http://example.com" (unquoted URL)
+  # Replace with: "  key: 'http://example.com'" (quoted URL)
+  yaml_str.gsub(/^(\s*\w+):\s+(https?:\/\/[^\s'"\n]+)$/, "\\1: '\\2'")
 end
 
 # ── Template building ──────────────────────────────────────────────────────────
