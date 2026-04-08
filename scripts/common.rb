@@ -412,7 +412,12 @@ def to_yaml_with_literal_blocks(hash)
   # Post-process: ensure URLs with :// are quoted to prevent YAML parsing issues
   # Match lines like: "  key: http://example.com" (unquoted URL)
   # Replace with: "  key: 'http://example.com'" (quoted URL)
-  yaml_str.gsub(/^(\s*\w+):\s+(https?:\/\/[^\s'"\n]+)$/, "\\1: '\\2'")
+  yaml_str = yaml_str.gsub(/^(\s*\w+):\s+(https?:\/\/[^\s'"\n]+)$/, "\\1: '\\2'")
+
+  # Post-process: quote array items containing curly braces { or } for consistency
+  # Match lines like: "  - 212555.{4}" (unquoted with braces)
+  # Replace with: "  - '212555.{4}'" (quoted for safety and consistency)
+  yaml_str.gsub(/^(\s*-\s+)([^\s'"\n]*[\{\}][^\s'"\n]*)$/, "\\1'\\2'")
 end
 
 # ── Template building ──────────────────────────────────────────────────────────
