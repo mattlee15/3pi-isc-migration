@@ -208,6 +208,14 @@ Both when reading and generating configs:
 - Example: `base_url: 'https://api.example.com'` (single-quoted)
 - Also quotes malformed special chars (e.g., `,abc` or `[test`) but leaves valid arrays intact
 
+### Secret Value Quoting (Automatic)
+For single-value templates:
+- `quote_scalar_if_needed()` - Quotes secret values containing YAML special characters
+- Prevents ISC substitution from producing invalid YAML
+- Quotes: values starting with `, [ ] { } : # & * ! | > ' " % @ ` or containing `: `
+- Quotes: YAML reserved words (`true`, `false`, `null`, `yes`, `no`, `on`, `off`)
+- Example: `,xci89xcznDia1WkjsxUQIi2k23` → `',xci89xcznDia1WkjsxUQIi2k23'`
+
 ---
 
 ## Common Tasks
