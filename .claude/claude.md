@@ -201,9 +201,12 @@ mark_migrated_in_csv!(csv_path, conf_name, environment)
 - `to_yaml_with_literal_blocks(hash)` - Formats with `|` for multiline, auto-quotes URLs
 
 ### URL Quoting (Automatic)
-- `to_yaml_with_literal_blocks()` automatically quotes URLs containing `://`
+Both when reading and generating configs:
+- `sanitize_yaml()` - Quotes URLs when reading existing configs from ISC
+- `to_yaml_with_literal_blocks()` - Quotes URLs when generating new configs
 - Prevents YAML parsing errors from unquoted `https://` or `http://` values
 - Example: `base_url: 'https://api.example.com'` (single-quoted)
+- Also quotes malformed special chars (e.g., `,abc` or `[test`) but leaves valid arrays intact
 
 ---
 
