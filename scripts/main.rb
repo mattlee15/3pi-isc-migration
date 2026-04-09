@@ -293,6 +293,34 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
     return :skipped
   end
 
+  # Check if config already uses auto_merge_secrets pattern
+  # (can be either string or symbol key depending on YAML parsing)
+  has_secrets_placeholder = (parsed.key?("secrets") && parsed["secrets"] == "$$secret$$") ||
+                            (parsed.key?(:secrets) && parsed[:secrets] == "$$secret$$")
+
+  if has_secrets_placeholder
+    puts
+    puts "  ⚠️  WARNING: This config already uses the auto_merge_secrets pattern!"
+    puts "  The config has 'secrets: $$secret$$' at root, indicating it's already migrated."
+    puts
+    puts "  Re-migrating this config may cause double-nesting issues (secrets.secrets.*)."
+    puts "  If you need to update the secret values, use the secret ref directly instead."
+    puts
+
+    choice = $tty.select("What would you like to do?", [
+      { name: "Skip this config (recommended)", value: :skip },
+      { name: "Continue anyway (advanced - may cause issues)", value: :continue },
+      { name: "Go back", value: :back },
+    ])
+
+    return :skipped if choice == :skip
+    return :back if choice == :back
+
+    puts
+    puts "  ⚠️  Proceeding with migration - be careful with key selection!"
+    puts
+  end
+
   puts
   if already_migrated
     puts "  NOTE: This conf already exists in #{current_dest_service} — you may be re-migrating."
@@ -300,16 +328,26 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
 
   # Pre-select likely secret keys for the multi-select defaults
   # Exclude fields containing "path" (e.g., token_path, key_path) as they're typically file paths, not secrets
+  # Exclude "secrets" key if it contains $$secret$$ (already-migrated auto_merge pattern)
   likely_secret_keys = all_keys.select do |k|
     field_name = k.split(".").last.downcase
+
+    # Skip "secrets" key that contains $$secret$$ placeholder
+    next false if k == "secrets" && (parsed["secrets"] == "$$secret$$" || parsed[:secrets] == "$$secret$$")
+
     field_name.match?(/secret|password|key|token|signature/) && !field_name.include?("path")
   end
   suggested_plan     = likely_secret_keys.any? ? suggest_plan(likely_secret_keys) : :no_secret
 
   # Key choices for manual selection (no :full mixed in — kept as a separate strategy)
+  # Filter out "secrets" key if it contains $$secret$$ placeholder
+  selectable_keys = all_keys.reject do |k|
+    k == "secrets" && (parsed["secrets"] == "$$secret$$" || parsed[:secrets] == "$$secret$$")
+  end
+
   key_choices  = []
   default_idxs = []
-  all_keys.each_with_index do |k, i|
+  selectable_keys.each_with_index do |k, i|
     is_likely = likely_secret_keys.include?(k)
     key_choices << { name: "#{k}#{is_likely ? '  *' : ''}", value: k }
     default_idxs << (i + 1) if is_likely  # 1-based
