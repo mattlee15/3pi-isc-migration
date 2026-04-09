@@ -31,6 +31,7 @@
 - ✅ Check for linked configs before deletion
 - ✅ Use `find_conf` (not `read_conf`) to check if config exists in specific service (prevents false positives from cross-service fallback)
 - ✅ All destructive operations must log to `report.txt`
+- ✅ **Auto-merge re-migration protection**: Detects if config already has `secrets: $$secret$$` and warns before proceeding to prevent double-nesting issues
 
 ---
 
@@ -331,6 +332,7 @@ ruby scripts/test_runtime_merge.rb
 | SSH key creation fails | Using `--value` instead of `--file` with tempfile |
 | Multiline secret broken YAML | Not using `to_yaml_with_literal_blocks` or not upgrading to multi-value |
 | Secret ref says "linked" but can't find | Check ALL services, use `isc secretref -c` |
+| Double-nesting: `secrets.secrets.*` | Accidentally re-migrated an already-migrated config → Tool now detects and warns |
 
 ---
 
