@@ -417,24 +417,8 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
 
   puts "  Plan: #{plan_label[plan]}"
 
-  # Check if any selected secret values contain newlines (multiline secrets like SSH keys)
-  # Single-value templates can't handle multiline values, so upgrade to multi-value template
-  unless plan == :no_secret
-    multiline_keys = secret_key_paths.select do |key_path|
-      value = parsed.dig(*key_path.split("."))
-      value.is_a?(String) && value.include?("\n")
-    end
-
-    if multiline_keys.any? && plan == :single_value_template
-      puts
-      puts "  ⚠ WARNING: Detected multiline secret values (e.g., SSH private keys):"
-      multiline_keys.each { |k| puts "    - #{k}" }
-      puts "  Single-value templates cannot handle multiline values properly."
-      puts "  Upgrading to auto-merge pattern for proper YAML formatting."
-      puts
-      plan = :auto_merge_secrets
-    end
-  end
+  # Note: Single-value templates now support multiline values via YAML literal block scalar (|) syntax
+  # No auto-upgrade needed - the secret ref value itself is formatted with |
 
   new_conf_name = derive_new_conf_name(conf_name)
   puts "  New conf name: #{new_conf_name}"

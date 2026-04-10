@@ -317,15 +317,15 @@ The plan is **auto-derived** from the keys you select — no separate confirmati
 
 | Plan | When | How |
 |------|------|-----|
-| `single_value_template` | Exactly 1 key selected (non-multiline) | Key stays in template, `$$secret$$` is the value: `password: $$secret$$`. Secret ref holds the raw scalar. |
-| `auto_merge_secrets` | **Everything else** (2+ keys OR multiline value) | Template contains ONLY non-secret fields + `$$secret$$` at end. Secret ref starts with `secrets:` root key containing ONLY secret fields with parent structure. At runtime, `configurations/base.rb` auto-merges `secrets:` into base config. |
+| `single_value_template` | Exactly 1 key selected (single-line OR multiline) | Key stays in template, `$$secret$$` is the value: `password: $$secret$$`. Secret ref holds the value (multiline values automatically formatted with YAML literal block scalar `\|` syntax). |
+| `auto_merge_secrets` | **2+ secret keys** (regardless of nesting) | Template contains ONLY non-secret fields + `$$secret$$` at end. Secret ref starts with `secrets:` root key containing ONLY secret fields with parent structure. At runtime, `configurations/base.rb` auto-merges `secrets:` into base config. |
 | `no_secret` | No keys selected (0 secret-like keys detected), or explicitly chosen | Config stored as **plain YAML** (not a secret ref). No `$$secret$$` substitution. Used for configs that were incorrectly stored as secrets. |
 
-**Note**: If a single-value template is selected but the value is multiline (SSH private keys, certificates, etc.), the tool **automatically upgrades to auto-merge pattern** to ensure proper YAML formatting.
+**Note**: Single-value templates now support multiline values (SSH keys, certificates) via automatic YAML literal block scalar (`|`) formatting in the secret ref value.
 
-#### Auto-Merge Secrets Pattern (Recommended for 2+ secrets or multiline secrets)
+#### Auto-Merge Secrets Pattern (Recommended for 2+ secrets)
 
-**Use case**: Multiple secrets, multiline secrets (SSH keys, certs), or secrets under different parent keys.
+**Use case**: Multiple secrets or secrets under different parent keys.
 
 **Example original config:**
 ```yaml

@@ -2,8 +2,19 @@
 
 # Migration module: single-value secret-ref template pattern.
 #
-# Use when there is exactly ONE sensitive field under a single parent key.
+# Use when there is exactly ONE sensitive field (single-line OR multiline).
 # The key stays in the template; $$secret$$ replaces only the value.
+#
+# Multiline values (SSH keys, certificates) are automatically formatted using
+# YAML literal block scalar (|) syntax in the secret ref value.
+#
+# Example (multiline):
+#   Template: private_key: $$secret$$
+#   Secret ref value:
+#     |
+#       -----BEGIN PRIVATE KEY-----
+#       [base64 encoded key data]
+#       -----END PRIVATE KEY-----
 #
 # Standalone usage:
 #   ruby tmp/3pi_isc_migration/scripts/migrate_single_value_template.rb \
@@ -51,9 +62,19 @@ module MigrateSingleValueTemplate
     puts "  Template:"
     puts template.gsub(/^/, "    ")
 
-    # Quote secret value if needed (for values with YAML special characters)
-    # This ensures ISC substitution produces valid YAML
-    quoted_secret_value = quote_scalar_if_needed(secret_value)
+    # Format secret value for YAML:
+    # - Multiline values: Use literal block scalar (|) syntax
+    # - Single-line values: Quote if needed (for special characters)
+    formatted_secret_value =
+      if secret_value.to_s.include?("\n")
+        # Multiline: format with | syntax
+        lines = secret_value.to_s.split("\n")
+        # First line is the | indicator, subsequent lines indented by 2 spaces
+        "|\n" + lines.map { |line| "  #{line}" }.join("\n")
+      else
+        # Single-line: quote if needed
+        quote_scalar_if_needed(secret_value)
+      end
 
     # Create, update, or reuse secret ref
     used_secretref =
@@ -61,15 +82,15 @@ module MigrateSingleValueTemplate
         linked = find_linked_confs_for_secret_ref(update_secret_ref_name, environment: environment)
         if linked.length <= 1
           puts "  Updating existing secret ref: #{update_secret_ref_name}"
-          update_secret_ref(update_secret_ref_name, quoted_secret_value, environment: environment)
+          update_secret_ref(update_secret_ref_name, formatted_secret_value, environment: environment)
           update_secret_ref_name
         else
           puts "  Existing secret ref linked to #{linked.length} confs — creating new one"
-          create_or_find_secret_ref(secret_ref_name, quoted_secret_value, environment: environment, skip_dedup: skip_dedup)
+          create_or_find_secret_ref(secret_ref_name, formatted_secret_value, environment: environment, skip_dedup: skip_dedup)
         end
       else
         puts "  Creating/finding secret ref: #{secret_ref_name}"
-        create_or_find_secret_ref(secret_ref_name, quoted_secret_value, environment: environment, skip_dedup: skip_dedup)
+        create_or_find_secret_ref(secret_ref_name, formatted_secret_value, environment: environment, skip_dedup: skip_dedup)
       end
     puts
 

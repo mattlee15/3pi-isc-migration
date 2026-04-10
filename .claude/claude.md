@@ -14,8 +14,8 @@
 
 ### Simplified 2-Pattern Approach
 ✅ **Only 2 patterns now** - simplified for easier maintenance
-1. **Single-value template**: 1 secret (non-multiline) → `password: $$secret$$`
-2. **Auto-merge secrets**: Everything else (2+ secrets OR multiline) → Template ends with `$$secret$$`, secret ref starts with `secrets:` root key
+1. **Single-value template**: 1 secret (single-line OR multiline) → `password: $$secret$$` (multiline values auto-formatted with `|` syntax)
+2. **Auto-merge secrets**: 2+ secrets → Template ends with `$$secret$$`, secret ref starts with `secrets:` root key
 
 **Auto-Merge Secrets Pattern** (NEW format):
 - **Template**: ONLY non-secret fields + `$$secret$$` at end (no `secrets:` prefix in template)
@@ -96,14 +96,14 @@
 
 | Pattern | Use Case | Example |
 |---------|----------|---------|
-| **single_value_template** | 1 secret field (non-multiline) | `password: $$secret$$` |
-| **auto_merge_secrets** | **Everything else** (2+ secrets OR multiline) | Template ends with `$$secret$$`; Secret ref: `secrets:` + only secret fields |
+| **single_value_template** | 1 secret field (single-line OR multiline) | `password: $$secret$$` |
+| **auto_merge_secrets** | **2+ secrets** (any structure) | Template ends with `$$secret$$`; Secret ref: `secrets:` + only secret fields |
 | **no_secret** | No secrets detected | Plain YAML config (no secret ref) |
 
 ### Multiline Values (SSH Keys, Certs)
-- ⚠️ Single-value templates CANNOT handle multiline → auto-upgrade to **auto-merge**
-- Secret ref uses YAML literal block scalar syntax: `key: \|\n  -----BEGIN...`
-- Must use `--file` flag (not `--value`) for `isc secretref create`
+- ✅ Single-value templates NOW support multiline via YAML literal block scalar (`|`) syntax
+- Secret ref value automatically formatted: `|\n  -----BEGIN...`
+- Use `--file` flag (not `--value`) for `isc secretref create` when secret ref value is multiline
 
 ---
 
