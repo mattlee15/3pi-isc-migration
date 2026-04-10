@@ -6,38 +6,43 @@
 # separate SecretRef, then uses the `secrets:` key with auto-flattening at runtime.
 #
 # How it works:
-# 1. Base config contains ALL fields (including secrets)
-# 2. Add `secrets: $$secret$$` at root level
-# 3. Secret ref contains ONLY secret fields with full parent structure preserved
-# 4. At runtime, configurations/base.rb:
-#    - Extracts the `secrets:` key
+# 1. Template contains ONLY non-secret fields, ends with $$secret$$
+# 2. Secret ref contains ONLY secret fields under `secrets:` root key
+# 3. At runtime, configurations/base.rb:
+#    - ISC substitutes $$secret$$ with secret ref content (including `secrets:` key)
+#    - Extracts the `secrets:` key from merged config
 #    - Deep merges it into base settings
-#    - Secrets override base values where they exist
 #
 # Example:
 #   Template:
-#     ncr:
-#       lms:
-#         base_url: https://example.com
-#         username: public_user
-#         password: placeholder_will_be_overridden
-#     secrets: $$secret$$
+#     dpn:
+#       base_url: https://api.example.com
+#       username: public_user
+#     ice:
+#       retailer: test-retailer
+#     $$secret$$
 #
 #   Secret ref:
-#     ncr:
-#       lms:
+#     secrets:
+#       dpn:
 #         password: actual_secret
+#       ice:
+#         master_key: another_secret
 #
 #   Result (at runtime after merge):
-#     ncr:
-#       lms:
-#         base_url: https://example.com
-#         username: public_user
-#         password: actual_secret  # ← overridden from secrets:
+#     dpn:
+#       base_url: https://api.example.com
+#       username: public_user
+#       password: actual_secret
+#     ice:
+#       retailer: test-retailer
+#       master_key: another_secret
 #
 # Benefits:
 #   - Clean separation: non-secrets in template, secrets in separate ref
-#   - Single ISC config per retailer (not two like Option 3)
+#   - Secret ref is valid standalone YAML (includes `secrets:` root key)
+#   - No confusing indentation rules for secret values
+#   - Single ISC config per retailer
 #   - Uses ISC template pattern (self-documenting with $$secret$$)
 #   - Zero plugin code changes needed
 #   - Non-secret values can be updated without touching secrets
@@ -90,7 +95,7 @@ module MigrateAutoMergeSecrets
     end
   end
 
-  # Build template: keeps ALL non-secret fields + adds secrets: $$secret$$
+  # Build template: keeps ALL non-secret fields + adds $$secret$$ at end
   def self.build_template(parsed, secret_key_paths)
     # Clone the full config
     template_hash = deep_dup(parsed)
@@ -152,23 +157,24 @@ module MigrateAutoMergeSecrets
 
     yaml_str = template_hash.to_yaml.sub(/\A---\n/, "")
 
-    # Add secrets: with $$secret$$ on next line with 2-space indent
-    # This ensures proper YAML structure after ISC substitution
-    yaml_str += "secrets:\n  $$secret$$\n"
+    # Add $$secret$$ at end (no indentation, no secrets: prefix)
+    # The secret ref itself will contain the secrets: root key
+    yaml_str += "$$secret$$\n"
 
     yaml_str
   end
 
-  # Build secret ref: ONLY secret fields with full parent structure preserved
+  # Build secret ref: ONLY secret fields under `secrets:` root key
   #
   # Example input:
   #   parsed: { "ncr" => { "lms" => { "base_url" => "...", "password" => "secret" } } }
   #   secret_key_paths: ["ncr.lms.password"]
   #
-  # Output (2-space indentation to match $$secret$$ position):
-  #   ncr:
-  #     lms:
-  #       password: secret
+  # Output (with secrets: root key):
+  #   secrets:
+  #     ncr:
+  #       lms:
+  #         password: secret
   def self.build_secret_value(parsed, secret_key_paths)
     secrets_hash = {}
 
@@ -205,18 +211,12 @@ module MigrateAutoMergeSecrets
       current[actual_keys.last] = value
     end
 
+    # Wrap secrets in the "secrets:" root key
+    full_secret_hash = { "secrets" => secrets_hash }
+
     # Convert to YAML with literal block scalars for multiline strings (SSH keys, certs)
-    yaml_fragment = to_yaml_with_literal_blocks(secrets_hash)
-
-    # ISC replaces "  $$secret$$" in template by:
-    #   - Line 0: gets template's 2-space indent
-    #   - Lines 1+: inserted as-is
-    # So we need lines 1+ to have +2 indent to align under secrets:
-    lines = yaml_fragment.split("\n")
-    return lines.first if lines.length == 1
-
-    # Add 2 spaces to all lines EXCEPT first (which gets template's indent)
-    ([lines.first] + lines[1..].map { |l| "  #{l}" }).join("\n")
+    # This produces valid standalone YAML starting with "secrets:"
+    to_yaml_with_literal_blocks(full_secret_hash)
   end
 
   # Run the migration.
@@ -281,8 +281,8 @@ module MigrateAutoMergeSecrets
     puts "  Verifying new conf..."
     new_raw = read_conf(new_conf_name, service: dest_service, environment: environment)
 
-    # The returned config should have the secrets: key populated with the secret ref value
-    # After ISC substitution, it should match the original when deep_merge is applied
+    # After ISC substitution, the config should have the secrets: key
+    # ($$secret$$ is replaced with the secret ref content which includes "secrets:")
     new_parsed = YAML.safe_load(new_raw)
 
     # Show what we got after ISC substitution
@@ -293,7 +293,7 @@ module MigrateAutoMergeSecrets
     if new_parsed.key?("secrets") || new_parsed.key?(:secrets)
       secrets_block = new_parsed.delete("secrets") || new_parsed.delete(:secrets)
       puts "    Secrets block type: #{secrets_block.class}"
-      # Deep merge secrets into base
+      # Deep merge secrets into base (simulating configurations/base.rb behavior)
       if secrets_block.is_a?(Hash)
         new_parsed = deep_merge_hash(new_parsed, secrets_block)
         puts "    Deep merged secrets into base"

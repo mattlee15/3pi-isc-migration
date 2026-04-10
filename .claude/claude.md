@@ -12,13 +12,21 @@
 
 ## Critical Rules
 
-### Auto-Merge Secrets Pattern - RECOMMENDED
-✅ **Now using auto-merge secrets pattern** - see [PR #763917](https://github.com/instacart/carrot/pull/763917) and [wiki](https://instacart.atlassian.net/wiki/spaces/ENTSO/pages/6481412238)
-- Replaces legacy `no_template` pattern for cross-parent secrets
-- **Template**: ALL fields + `secrets: $$secret$$` at root
-- **Secret ref**: ONLY secret fields with parent structure preserved
-- **Runtime**: `configurations/base.rb` auto-merges `secrets:` into base config
-- **Benefits**: Clean separation, single ISC config, zero plugin changes
+### Simplified 2-Pattern Approach
+✅ **Only 2 patterns now** - simplified for easier maintenance
+1. **Single-value template**: 1 secret (non-multiline) → `password: $$secret$$`
+2. **Auto-merge secrets**: Everything else (2+ secrets OR multiline) → Template ends with `$$secret$$`, secret ref starts with `secrets:` root key
+
+**Auto-Merge Secrets Pattern** (NEW format):
+- **Template**: ONLY non-secret fields + `$$secret$$` at end (no `secrets:` prefix in template)
+- **Secret ref**: Starts with `secrets:` root key, contains ONLY secret fields with parent structure
+- **Runtime**: ISC substitutes `$$secret$$` with secret ref (including `secrets:` key), then `configurations/base.rb` auto-merges
+- **Benefits**: Valid standalone YAML for secret ref, no indentation complexity, clean separation
+
+**Legacy auto-merge format** (still works but not recommended):
+- Several existing configs use older format: template had `secrets:\n  $$secret$$`, secret ref had indentation rules
+- Both formats supported by `configurations/base.rb`
+- **Use new format for all new configs and re-migrations**
 
 ### ISC CLI Restrictions
 ⚠️ **NEVER run `isc secretref create/update` or `isc conf set` commands via bash/shell execution in AI agent mode.**
@@ -69,8 +77,7 @@
     ├── main.rb                  # Interactive UI - entry point
     ├── common.rb                # Shared ISC helpers
     ├── migrate_single_value_template.rb
-    ├── migrate_multi_value_template.rb
-    ├── migrate_auto_merge_secrets.rb   # RECOMMENDED for cross-parent secrets
+    ├── migrate_auto_merge_secrets.rb   # RECOMMENDED for 2+ secrets or multiline
     ├── migrate_no_secret.rb
     └── test_*.rb                # Test scripts
 ```
@@ -85,18 +92,17 @@
 - **Template**: Conf with `$$secret$$` placeholder that gets substituted at runtime
 - **Service Pattern**: Controls which services can access a conf (e.g., `*.integrations.integrations` = all integration services)
 
-### Migration Patterns
+### Migration Patterns (Simplified to 2 patterns)
 
 | Pattern | Use Case | Example |
 |---------|----------|---------|
 | **single_value_template** | 1 secret field (non-multiline) | `password: $$secret$$` |
-| **multi_value_template** | 2+ fields under same parent, OR 1 multiline field | Standalone `$$secret$$` block with YAML literal scalar (`\|`) for multiline |
-| **auto_merge_secrets** | **Fields under different parents (RECOMMENDED)** | Template: ALL fields + `secrets: $$secret$$`; Secret ref: only secrets with parent structure |
+| **auto_merge_secrets** | **Everything else** (2+ secrets OR multiline) | Template ends with `$$secret$$`; Secret ref: `secrets:` + only secret fields |
 | **no_secret** | No secrets detected | Plain YAML config (no secret ref) |
 
 ### Multiline Values (SSH Keys, Certs)
-- ⚠️ Single-value templates CANNOT handle multiline → auto-upgrade to multi-value
-- Uses YAML literal block scalar syntax: `key: \|\n  -----BEGIN...`
+- ⚠️ Single-value templates CANNOT handle multiline → auto-upgrade to **auto-merge**
+- Secret ref uses YAML literal block scalar syntax: `key: \|\n  -----BEGIN...`
 - Must use `--file` flag (not `--value`) for `isc secretref create`
 
 ---

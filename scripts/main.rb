@@ -12,7 +12,6 @@
 
 require_relative "common"
 require_relative "migrate_single_value_template"
-require_relative "migrate_multi_value_template"
 require_relative "migrate_auto_merge_secrets"
 require_relative "migrate_no_secret"
 require "csv"
@@ -107,8 +106,8 @@ def suggest_plan(secret_key_paths)
   return :no_secret if secret_key_paths.empty?
   return :single_value_template if secret_key_paths.length == 1
 
-  parents = secret_key_paths.map { |p| p.split(".")[0..-2].join(".") }.uniq
-  parents.length == 1 ? :multi_value_template : :auto_merge_secrets
+  # For 2+ secrets, always use auto_merge_secrets (simplified approach)
+  :auto_merge_secrets
 end
 
 def derive_new_conf_name(source_conf)
@@ -124,7 +123,7 @@ def derive_secret_ref_name(source_conf, plan, secret_key: nil)
     elsif plan == :single_value_template
       "SECRET"
     else
-      # multi_value_template and auto_merge_secrets use _SECRETS suffix
+      # auto_merge_secrets uses _SECRETS suffix
       "SECRETS"
     end
   "#{base}_#{suffix}"
@@ -200,6 +199,19 @@ rescue IscError => e
 end
 
 def find_source_secret_ref(source_conf, raw_conf_value:, environment:)
+  # FIRST: Check what secret ref is ACTUALLY linked to the source config
+  # This is the authoritative source - don't guess by name!
+  source_meta = find_conf(source_conf, service: current_source_service, environment: environment)
+  if source_meta
+    # Try various field names that ISC uses for secret ref name
+    ref_name = source_meta["secretref_name"] || source_meta["secretref"] ||
+               source_meta["secret_ref_name"] || source_meta["secret_ref"] ||
+               source_meta["secretRefName"]
+    return ref_name if ref_name && !ref_name.to_s.strip.empty?
+  end
+
+  # FALLBACK: Only use name-based guessing if metadata doesn't have the linked secret ref
+  # This handles edge cases where ISC metadata is incomplete
   ref = find_secret_ref(source_conf, environment: environment)
   return ref["name"] if ref
 
@@ -418,9 +430,9 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
       puts "  ⚠ WARNING: Detected multiline secret values (e.g., SSH private keys):"
       multiline_keys.each { |k| puts "    - #{k}" }
       puts "  Single-value templates cannot handle multiline values properly."
-      puts "  Upgrading to multi-value template for proper YAML formatting."
+      puts "  Upgrading to auto-merge pattern for proper YAML formatting."
       puts
-      plan = :multi_value_template
+      plan = :auto_merge_secrets
     end
   end
 
@@ -440,7 +452,6 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
     secret_value_to_store =
       case plan
       when :single_value_template then parsed.dig(*secret_key_paths.first.split(".")).to_s
-      when :multi_value_template  then build_secret_block(parsed, secret_key_paths)
       when :auto_merge_secrets    then MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
       end
 
@@ -574,16 +585,6 @@ def migrate_one(conf_name, environment:, raw:, already_migrated:)
         secret_ref_name = reuse_secret_ref || (force_new_unique_name ? derive_unique_secret_ref_name(base_name, environment: environment) : base_name)
         MigrateSingleValueTemplate.run(
           parsed: parsed, source_conf: conf_name, secret_key_path: secret_key_paths.first,
-          new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
-          environment: environment, dest_service: current_dest_service, report_path: nil,
-          update_secret_ref_name: update_secret_ref_name, skip_dedup: skip_dedup_this_config,
-        )
-
-      when :multi_value_template
-        base_name = derive_secret_ref_name(conf_name, plan)
-        secret_ref_name = reuse_secret_ref || (force_new_unique_name ? derive_unique_secret_ref_name(base_name, environment: environment) : base_name)
-        MigrateMultiValueTemplate.run(
-          parsed: parsed, source_conf: conf_name, secret_key_paths: secret_key_paths,
           new_conf_name: new_conf_name, secret_ref_name: secret_ref_name,
           environment: environment, dest_service: current_dest_service, report_path: nil,
           update_secret_ref_name: update_secret_ref_name, skip_dedup: skip_dedup_this_config,

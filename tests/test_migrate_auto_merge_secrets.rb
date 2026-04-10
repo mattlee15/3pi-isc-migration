@@ -5,18 +5,17 @@ require_relative "../scripts/migrate_auto_merge_secrets"
 
 # Tests for auto_merge_secrets migration pattern.
 # This pattern handles cross-parent secrets by:
-# 1. Template: ALL fields + secrets: $$secret$$ at root
-# 2. Secret ref: ONLY secret fields with parent structure preserved
-# 3. Runtime: configurations/base.rb auto-merges secrets: into base config
+# 1. Template: ONLY non-secret fields + $$secret$$ at end
+# 2. Secret ref: ONLY secret fields under `secrets:` root key
+# 3. Runtime: ISC substitutes $$secret$$, then configurations/base.rb auto-merges secrets: into base config
 class TestMigrateAutoMergeSecrets < Minitest::Test
   # Helper: simulate ISC substitution + runtime merge (what configurations/base.rb does)
   def simulate_runtime_merge(template, secret_value)
-    # ISC replaces "  $$secret$$" → "  " + secret_value
-    # (Keeps template's 2-space indent, secret value inserted after it)
-    substituted = template.gsub("  $$secret$$", "  #{secret_value}")
+    # ISC replaces "$$secret$$" with the entire secret_value (which includes "secrets:" key)
+    substituted = template.gsub("$$secret$$", secret_value)
     template_parsed = YAML.safe_load(substituted)
 
-    # Extract secrets: key
+    # Extract secrets: key (which came from the secret ref)
     secrets_block = template_parsed.delete("secrets")
     return template_parsed unless secrets_block.is_a?(Hash)
 
@@ -64,29 +63,29 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     refute_match(/password:/, template)
     refute_match(/api_key:/, template)
 
-    # Template should have secrets: with $$secret$$ on next line
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
+    refute_match(/secrets:\n  \$\$secret\$\$/, template)
 
     # Build secret value
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
-    # Verify runtime behavior - secret value is only valid after ISC substitution
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
+    # Verify runtime behavior
     merged = simulate_runtime_merge(template, secret_value)
 
     # Verify the merged result has all secret fields
     assert_equal "secret123", merged.dig("ncr", "lms", "password")
     assert_equal "key456", merged["api"]["api_key"]
 
-    # Verify merged result does NOT contain extra fields in secret portion
-    # (template has the non-secret fields)
+    # Verify merged result has non-secret fields from template
     assert_equal "https://api.example.com", merged.dig("ncr", "lms", "base_url")
     assert_equal "public_user", merged.dig("ncr", "lms", "username")
     assert_equal "https://api2.example.com", merged.dig("api", "endpoint")
 
-    # Verify runtime behavior (simulate what configurations/base.rb does)
-    merged = simulate_runtime_merge(template, secret_value)
-
-    # Final result should have all fields with secrets overriding placeholders
+    # Final result should match original
     assert_equal parsed, merged
   end
 
@@ -117,11 +116,15 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Verify template has non-secret fields only
     assert_match(/username: user1/, template)
     assert_match(/timeout: 30/, template)
     assert_match(/url: https:\/\/example\.com/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Verify template does NOT have secret fields
     refute_match(/password:/, template)
@@ -153,6 +156,9 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
 
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
 
     # Template should preserve non-secret fields only
     assert_match(/host: sftp\.example\.com/, template)
@@ -194,10 +200,14 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template has non-secret fields only
     assert_match(/username: admin/, template)
     assert_match(/host: db\.example\.com/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template does NOT have secret fields
     refute_match(/password:/, template)
@@ -226,9 +236,13 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template has non-secret fields only
     assert_match(/timeout: 30/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template does NOT have secret fields
     refute_match(/global_api_key:/, template)
@@ -256,6 +270,9 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
 
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
+
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
 
     # Verify runtime merge preserves special characters
     merged = simulate_runtime_merge(template, secret_value)
@@ -289,6 +306,9 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Certificate chain should use literal block scalar
     assert_match(/certificate_chain: \|/, secret_value)
     assert_match(/BEGIN CERTIFICATE/, secret_value)
@@ -317,8 +337,11 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Array should be preserved in template
-    template_only = template.gsub("secrets:\n  $$secret$$\n", "")
+    template_only = template.gsub("$$secret$$\n", "")
     template_parsed = YAML.safe_load(template_only)
     assert_equal parsed["endpoints"], template_parsed["endpoints"]
 
@@ -343,8 +366,11 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Empty parent should be preserved
-    template_only = template.gsub("secrets:\n  $$secret$$\n", "")
+    template_only = template.gsub("$$secret$$\n", "")
     template_parsed = YAML.safe_load(template_only)
     assert_equal({}, template_parsed.dig("api", "credentials"))
 
@@ -372,10 +398,14 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template should preserve all non-secret fields
     assert_match(/level4_public: public_value/, template)
     assert_match(/level3_public: another_public/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template should NOT have secret field
     refute_match(/level4_secret:/, template)
@@ -405,9 +435,13 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template should have the public branch
     assert_match(/level4_public: public_value/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template should NOT have level3_with_secret at all (empty after removing secret)
     refute_match(/level3_with_secret:/, template)
@@ -444,9 +478,13 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template should only have public value
     assert_match(/level4_public: public_value/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template should NOT have any secret fields
     refute_match(/level2_secret:/, template)
@@ -492,11 +530,15 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template should preserve all non-secret fields
     assert_match(/endpoint: https:\/\/east\.example\.com/, template)
     assert_match(/endpoint: https:\/\/west\.example\.com/, template)
     assert_match(/url: https:\/\/london\.example\.com/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template should NOT have secret fields
     refute_match(/api_key:/, template)
@@ -526,10 +568,14 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template should have non-secret fields only
     assert_match(/regular: public_value/, template)
     assert_match(/timeout: 1/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template should NOT have secret fields
     refute_match(/another_key:/, template)
@@ -578,13 +624,17 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template should preserve all non-secret fields
     assert_match(/retailer: test_retailer/, template)
     assert_match(/base_url: https:\/\/webservices\.example\.com/, template)
     assert_match(/app_id: 127/, template)
     assert_match(/client_id: TestUser/, template)
     assert_match(/partner_id: 517/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template should NOT have secret fields
     refute_match(/secret_key:/, template)
@@ -618,6 +668,9 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     template = MigrateAutoMergeSecrets.build_template(parsed, secret_key_paths)
     secret_value = MigrateAutoMergeSecrets.build_secret_value(parsed, secret_key_paths)
 
+    # Secret value should start with "secrets:" root key
+    assert_match(/\Asecrets:/, secret_value)
+
     # Template should preserve non-secret fields under integer keys
     assert_match(/9176:/, template)
     assert_match(/9177:/, template)
@@ -626,7 +679,8 @@ class TestMigrateAutoMergeSecrets < Minitest::Test
     assert_match(/endpoint: https:\/\/es\.example\.com/, template)
     assert_match(/endpoint: https:\/\/fr\.example\.com/, template)
     assert_match(/timeout: 30/, template)
-    assert_match(/secrets:\n  \$\$secret\$\$/, template)
+    # Template should end with just $$secret$$ (no secrets: prefix)
+    assert_match(/\$\$secret\$\$\n\z/, template)
 
     # Template should NOT have secret fields
     refute_match(/client_secret:/, template)
